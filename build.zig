@@ -13,10 +13,6 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
-    // link mvzr
-    const mvzr = b.dependency("mvzr", .{ .target = target, .optimize = optimize });
-    exe.root_module.addImport("mvzr", mvzr.module("mvzr"));
-
     // run step
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

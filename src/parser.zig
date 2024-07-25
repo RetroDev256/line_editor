@@ -2,14 +2,10 @@ const std = @import("std");
 
 const Tokenizer = @import("Tokenizer.zig");
 
-pub const Number = union(enum) {
-    specific: usize, // 123...
-    infinity, // $
-};
-pub const Range = struct {
-    start: ?Number,
-    end: ?Number,
-};
+const BoundedRange = @import("range.zig").BoundedRange;
+const Number = @import("range.zig").Number;
+const Range = @import("range.zig").Range;
+
 pub const Insert = struct {
     line: ?Number,
     text: ?[]const u8,
@@ -24,23 +20,17 @@ pub const Write = struct {
     range: ?Range,
     file_out: ?[]const u8,
 };
-pub const Delete = struct { range: ?Range };
-pub const Print = struct { range: ?Range };
 
 pub const Command = union(enum) {
     none,
-    quit, // check
-
-    delete: Delete, // done
-    print: Print, // done
-
-    write: Write, // done
-    write_quit: Write, // done
-
+    quit,
+    delete: ?Range,
+    print: ?Range,
+    write: Write,
+    write_quit: Write,
     insert: Insert,
     substitution: Substitution,
-
-    line: Number, // check
+    line: Number,
 };
 
 const State = enum {
@@ -55,189 +45,147 @@ const State = enum {
 
 // sub_arg or other_string
 fn parseString(tokenizer: *Tokenizer) ?[]const u8 {
-    var toker_a = tokenizer.*; // copy for peeking
-    const peek_a = toker_a.next();
+    var toker = tokenizer.*; // copy for peeking
+    const peek_a = toker.next();
     if (peek_a.tag == .sub_arg or peek_a.tag == .other_string) {
-        tokenizer.* = toker_a;
+        tokenizer.* = toker;
         return tokenizer.buffer[peek_a.loc.start..peek_a.loc.end];
     }
     return null;
 }
 // 123..., or $ for infinity
 fn parseNumber(tokenizer: *Tokenizer) ?Number {
-    var toker_a = tokenizer.*; // copy for peeking
-    const peek_a = toker_a.next();
+    var toker = tokenizer.*; // copy for peeking
+    const peek_a = toker.next();
     switch (peek_a.tag) {
-        .number => {
+        .number, .sub_arg => {
             const num_str = tokenizer.buffer[peek_a.loc.start..peek_a.loc.end];
             if (std.fmt.parseInt(usize, num_str, 10)) |number| {
-                tokenizer.* = toker_a; // update the tokenizer
+                tokenizer.* = toker; // update the tokenizer
                 return .{ .specific = number };
             } else |_| {}
         },
-        .range_file_end => {
-            tokenizer.* = toker_a; // update the tokenizer
+        else => if (std.mem.eql(u8, tokenizer.buffer[peek_a.loc.start..peek_a.loc.end], "$")) {
+            tokenizer.* = toker; // update the tokenizer
             return .infinity;
         },
-        .sub_arg => { // for the substitution command
-            const sub_num_str = tokenizer.buffer[peek_a.loc.start..peek_a.loc.end];
-            if (std.mem.eql(u8, sub_num_str, "$")) {
-                tokenizer.* = toker_a; // update the tokenizer
-                return .infinity;
-            } else {
-                if (std.fmt.parseInt(usize, sub_num_str, 10)) |number| {
-                    tokenizer.* = toker_a; // update the tokenizer
-                    return .{ .specific = number };
-                } else |_| {}
-            }
-        },
-        else => {},
     }
     return null;
 }
 // NUM? SEP NUM?, or NUM
 fn parseRange(tokenizer: *Tokenizer) ?Range {
     var toker_a = tokenizer.*; // copy for peeking
-    const first_num = parseNumber(&toker_a);
-    if (first_num) |_| { // NUM SEP NUM, NUM SEP, NUM
-        const second_num = blk: {
-            var toker_b = toker_a;
-            if (toker_b.next().tag == .range_seperator) {
-                toker_a = toker_b;
-                break :blk parseNumber(&toker_a);
-            }
-            break :blk first_num; // only a first number means range of 1
+    const first = parseNumber(&toker_a);
+    var toker_b = toker_a; // copy for peeking
+    const seperator = toker_b.next().tag;
+    const second = parseNumber(&toker_b);
+    if (seperator == .range_seperator) { // NUM? SEP NUM?
+        tokenizer.* = toker_b; // update the tokenizer
+        return Range{
+            // for converting between exclusive and inclusive ranges
+            .start = if (first) |index| index.dec() else first,
+            .end = if (second) |index| index else second,
         };
-        tokenizer.* = toker_a;
-        return Range{ .start = first_num, .end = second_num };
-    } else if (toker_a.next().tag == .range_seperator) { // SEP NUM, or suspend
-        const second_num = parseNumber(&toker_a);
-        tokenizer.* = toker_a;
-        return Range{ .start = first_num, .end = second_num };
+    } else if (first) |index| { // NUM
+        tokenizer.* = toker_a; // rollback to just after first number
+        // for converting between exclusive and inclusive ranges
+        return Range{ .start = index.dec(), .end = index };
     }
     return null;
 }
 
 // QUIT EOF
-fn parseQuitCmd(tokenizer: Tokenizer) ?void {
-    var toker_a = tokenizer; // copy for peeking
-    if (toker_a.next().tag == .quit_cmd) {
-        if (toker_a.next().tag == .none) {
-            return;
+fn parseQuitCmd(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    if (toker.next().tag == .quit_cmd) {
+        if (toker.next().tag == .none) {
+            return .quit;
         }
     }
     return null;
 }
-// RANGE? DELETE EOF
-fn parseDeleteCmd(tokenizer: Tokenizer) ?Delete {
-    var toker_a = tokenizer; // copy for peeking
-    const range = parseRange(&toker_a);
-    if (toker_a.next().tag == .delete_cmd) {
-        if (toker_a.next().tag == .none) {
-            return .{ .range = range };
-        }
+// RANGE? DELETE/PRINT EOF
+fn parseDeleteOrPrintCmd(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    const range = parseRange(&toker);
+    const command = toker.next();
+    if (toker.next().tag == .none) {
+        return switch (command.tag) {
+            .print_cmd => Command{ .print = range },
+            .delete_cmd => Command{ .delete = range },
+            else => null, // sadge
+        };
     }
     return null;
 }
-// RANGE? PRINT EOF
-fn parsePrintCmd(tokenizer: Tokenizer) ?Print {
-    var toker_a = tokenizer; // copy for peeking
-    const range = parseRange(&toker_a);
-    if (toker_a.next().tag == .print_cmd) {
-        if (toker_a.next().tag == .none) {
-            return .{ .range = range };
-        }
-    }
-    return null;
-}
-// RANGE? WRITE STRING? EOF
-fn parseWriteCmd(tokenizer: Tokenizer) ?Write {
-    var toker_a = tokenizer; // copy for peeking
-    const range = parseRange(&toker_a);
-    if (toker_a.next().tag == .write_cmd) {
-        const file_out = parseString(&toker_a);
-        if (toker_a.next().tag == .none) {
-            return .{ .range = range, .file_out = file_out };
-        }
-    }
-    return null;
-}
-// RANGE? WRITEQUIT STRING? EOF
-fn parseWriteQuitCmd(tokenizer: Tokenizer) ?Write {
-    var toker_a = tokenizer; // copy for peeking
-    const range = parseRange(&toker_a);
-    if (toker_a.next().tag == .write_quit_cmd) {
-        const file_out = parseString(&toker_a);
-        if (toker_a.next().tag == .none) {
-            return .{ .range = range, .file_out = file_out };
-        }
+// RANGE? WRITE/WRITEQUIT STRING? EOF
+fn parseWriteorWriteQuitCmd(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    const range = parseRange(&toker);
+    const command = toker.next();
+    const file_out = parseString(&toker);
+    if (toker.next().tag == .none) {
+        return switch (command.tag) {
+            .write_cmd => Command{ .write = .{ .range = range, .file_out = file_out } },
+            .write_quit_cmd => Command{ .write_quit = .{ .range = range, .file_out = file_out } },
+            else => null, // sadge
+        };
     }
     return null;
 }
 // NUMBER? INSERT EOF
-fn parseInsertCmd(tokenizer: Tokenizer) ?Insert {
-    var toker_a = tokenizer;
-    const line = parseNumber(&toker_a);
-    const next_tok = toker_a.next();
-    if (next_tok.tag == .insert) {
-        const text = toker_a.buffer[next_tok.loc.start..next_tok.loc.end];
-        if (toker_a.next().tag == .none) {
-            return .{
-                .line = line,
-                .text = if (text.len == 0) null else text,
-            };
+fn parseInsertCmd(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    const line = parseNumber(&toker);
+    const insert_tok = toker.next();
+    if (insert_tok.tag == .insert) {
+        const text = toker.buffer[insert_tok.loc.start..insert_tok.loc.end];
+        if (toker.next().tag == .none) {
+            if (text.len > 0) {
+                return Command{ .insert = .{ .line = line, .text = text } };
+            } else {
+                return Command{ .insert = .{ .line = line, .text = null } };
+            }
         }
     }
     return null;
 }
 // RANGE? SUB STRING STRING NUMBER?
-fn parseSubstitutionCmd(tokenizer: Tokenizer) ?Substitution {
-    var toker_a = tokenizer;
-    const range = parseRange(&toker_a);
-    if (toker_a.next().tag == .substitute_cmd) {
-        if (parseString(&toker_a)) |pattern| {
-            if (parseString(&toker_a)) |replacement| {
-                const count = parseNumber(&toker_a);
-                return .{
+fn parseSubstitutionCmd(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    const range = parseRange(&toker);
+    if (toker.next().tag == .substitute_cmd) {
+        if (parseString(&toker)) |pattern| {
+            if (parseString(&toker)) |replacement| {
+                const count = parseNumber(&toker);
+                return Command{ .substitution = .{
                     .range = range,
                     .pattern = pattern,
                     .replacement = replacement,
                     .count = count,
-                };
+                } };
             }
         }
     }
     return null;
 }
 // NUM EOF
-fn parseLineCmd(tokenizer: Tokenizer) ?Number {
-    var toker_a = tokenizer; // copy for peeking
-    if (parseNumber(&toker_a)) |line_number| { // NUM
-        if (toker_a.next().tag == .none) { // EOF
-            return line_number;
+fn parseLineCmd(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    if (parseNumber(&toker)) |line_number| { // NUM
+        if (toker.next().tag == .none) { // EOF
+            return Command{ .line = line_number };
         }
     }
     return null;
 }
 
 pub fn parse(source: []const u8) Command {
-    const tokenizer = Tokenizer.init(source);
-    if (parseQuitCmd(tokenizer)) |quit| {
-        return .{ .quit = quit };
-    } else if (parseDeleteCmd(tokenizer)) |delete| {
-        return .{ .delete = delete };
-    } else if (parsePrintCmd(tokenizer)) |print| {
-        return .{ .print = print };
-    } else if (parseWriteCmd(tokenizer)) |write| {
-        return .{ .write = write };
-    } else if (parseWriteQuitCmd(tokenizer)) |write_quit| {
-        return .{ .write_quit = write_quit };
-    } else if (parseInsertCmd(tokenizer)) |insert| {
-        return .{ .insert = insert };
-    } else if (parseSubstitutionCmd(tokenizer)) |substitution| {
-        return .{ .substitution = substitution };
-    } else if (parseLineCmd(tokenizer)) |line| {
-        return .{ .line = line };
-    }
+    if (parseQuitCmd(source)) |command| return command;
+    if (parseDeleteOrPrintCmd(source)) |command| return command;
+    if (parseWriteorWriteQuitCmd(source)) |command| return command;
+    if (parseInsertCmd(source)) |command| return command;
+    if (parseSubstitutionCmd(source)) |command| return command;
+    if (parseLineCmd(source)) |command| return command;
     return .none;
 }

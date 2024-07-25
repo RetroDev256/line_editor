@@ -5,6 +5,10 @@ const Allocator = std.mem.Allocator;
 const arg_parser = @import("arg_parser.zig");
 const Runner = @import("Runner.zig");
 
+// disable logging to anything but error,
+// due to mvzr using std.log
+pub const std_options: std.Options = .{ .log_level = .err };
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const safe = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;

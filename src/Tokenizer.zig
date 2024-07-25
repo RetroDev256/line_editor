@@ -39,10 +39,14 @@ pub fn init(source: []const u8) @This() {
 
 const State = enum {
     start,
-    number, // delimited by anything but 0...9
-    command, // delimited by whitespace
-    sub_arg, // delimited by /
-    other_string, // not limited
+    /// delimited by anything but 0...9
+    number,
+    /// delimited by whitespace
+    command,
+    /// delimited by /
+    sub_arg,
+    /// not limited
+    other_string,
 };
 
 // peek by duping the struct - it's light enough
