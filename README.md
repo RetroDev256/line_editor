@@ -28,4 +28,4 @@ You can even create scripts to operate on files with this editor.
 A range consists of one or two numbers defining where an action will occur. The format is NUMBER,NUMBER, where each number can be replaced by $ to signify the end of the file.
 
 For substitution, the format is similar to ED:
-RANGE s/before_regex/replacement/count. The count is optional and can be replaced by $, or omitted to mean all matches on each line in the range. There is no space between the range and s.
+`[range]s/regex_pattern/replacement_text/count`. The count is optional. It can be replaced by $ or omitted to mean all matches on each line in the range.
