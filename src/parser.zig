@@ -14,7 +14,6 @@ pub const Substitution = struct {
     range: ?Range,
     pattern: []const u8,
     replacement: []const u8,
-    count: ?Number,
 };
 pub const Write = struct {
     range: ?Range,
@@ -40,25 +39,33 @@ const State = enum {
     substitute,
 };
 
+// updates the tokenizer if the expected token is a match,
+// returns the token.
+fn eat(tokenizer: *Tokenizer, expected: Tokenizer.Token.Tag) ?Tokenizer.Token {
+    var toker = tokenizer.*; // copy for peeking
+    const token = toker.next();
+    if (token.tag == expected) {
+        tokenizer.* = toker; // update the tokenizer
+        return token;
+    }
+    return null;
+}
+
 // parser functions that don't parse complete commands
 // update the tokenizer as necessary
 
 // sub_arg or other_string
 fn parseString(tokenizer: *Tokenizer) ?[]const u8 {
-    var toker = tokenizer.*; // copy for peeking
-    const peek_a = toker.next();
-    if (peek_a.tag == .sub_arg or peek_a.tag == .other_string) {
-        tokenizer.* = toker;
-        return tokenizer.buffer[peek_a.loc.start..peek_a.loc.end];
-    }
-    return null;
+    if (eat(tokenizer, .sub_arg) orelse eat(tokenizer, .other_string)) |token| {
+        return tokenizer.buffer[token.loc.start..token.loc.end];
+    } else return null;
 }
 // 123..., or $ for infinity
 fn parseNumber(tokenizer: *Tokenizer) ?Number {
     var toker = tokenizer.*; // copy for peeking
     const peek_a = toker.next();
     switch (peek_a.tag) {
-        .number, .sub_arg => {
+        .number => {
             const num_str = tokenizer.buffer[peek_a.loc.start..peek_a.loc.end];
             if (std.fmt.parseInt(usize, num_str, 10)) |number| {
                 tokenizer.* = toker; // update the tokenizer
@@ -72,24 +79,30 @@ fn parseNumber(tokenizer: *Tokenizer) ?Number {
     }
     return null;
 }
+// use for when you expect an index, not a number
+// the difference is that this changes the number so that
+// we can index in a 0 indexed array, while the user interface
+// makes things seem like they are indexed from 1
+fn parseIndex(tokenizer: *Tokenizer) ?Number {
+    if (parseNumber(tokenizer)) |number| {
+        return number.dec();
+    } else return null;
+}
 // NUM? SEP NUM?, or NUM
 fn parseRange(tokenizer: *Tokenizer) ?Range {
     var toker_a = tokenizer.*; // copy for peeking
-    const first = parseNumber(&toker_a);
+    const first = parseIndex(&toker_a);
     var toker_b = toker_a; // copy for peeking
     const seperator = toker_b.next().tag;
-    const second = parseNumber(&toker_b);
+    const second = parseIndex(&toker_b);
     if (seperator == .range_seperator) { // NUM? SEP NUM?
         tokenizer.* = toker_b; // update the tokenizer
-        return Range{
-            // for converting between exclusive and inclusive ranges
-            .start = if (first) |index| index.dec() else first,
-            .end = if (second) |index| index else second,
-        };
+        // for converting between exclusive and inclusive ranges
+        return Range{ .start = first, .end = if (second) |idx| idx.inc() else second };
     } else if (first) |index| { // NUM
         tokenizer.* = toker_a; // rollback to just after first number
         // for converting between exclusive and inclusive ranges
-        return Range{ .start = index.dec(), .end = index };
+        return Range{ .start = index, .end = index.inc() };
     }
     return null;
 }
@@ -136,7 +149,7 @@ fn parseWriteorWriteQuitCmd(source: []const u8) ?Command {
 // NUMBER? INSERT EOF
 fn parseInsertCmd(source: []const u8) ?Command {
     var toker = Tokenizer.init(source);
-    const line = parseNumber(&toker);
+    const line = parseIndex(&toker);
     const insert_tok = toker.next();
     if (insert_tok.tag == .insert) {
         const text = toker.buffer[insert_tok.loc.start..insert_tok.loc.end];
@@ -157,12 +170,10 @@ fn parseSubstitutionCmd(source: []const u8) ?Command {
     if (toker.next().tag == .substitute_cmd) {
         if (parseString(&toker)) |pattern| {
             if (parseString(&toker)) |replacement| {
-                const count = parseNumber(&toker);
                 return Command{ .substitution = .{
                     .range = range,
                     .pattern = pattern,
                     .replacement = replacement,
-                    .count = count,
                 } };
             }
         }
@@ -172,7 +183,7 @@ fn parseSubstitutionCmd(source: []const u8) ?Command {
 // NUM EOF
 fn parseLineCmd(source: []const u8) ?Command {
     var toker = Tokenizer.init(source);
-    if (parseNumber(&toker)) |line_number| { // NUM
+    if (parseIndex(&toker)) |line_number| { // NUM
         if (toker.next().tag == .none) { // EOF
             return Command{ .line = line_number };
         }

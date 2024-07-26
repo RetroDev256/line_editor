@@ -17,6 +17,13 @@ pub const Number = union(enum) {
             .infinity => .infinity,
         };
     }
+    // used for converting between exclusive and inclusive ranges
+    pub fn inc(self: Number) Number {
+        return switch (self) {
+            .specific => |line_number| .{ .specific = line_number + 1 },
+            .infinity => .infinity,
+        };
+    }
 };
 
 pub const BoundedRange = struct {
@@ -45,10 +52,10 @@ pub const Range = struct {
     start: ?Number,
     end: ?Number,
 
-    pub fn toIndexes(self: Range, extremities: BoundedRange, end_of_file: usize) BoundedRange {
+    pub fn toIndexes(self: Range, extremities: BoundedRange, last_index: usize) BoundedRange {
         return .{
-            .start = if (self.start) |s| s.toIndex(end_of_file) else extremities.start,
-            .end = if (self.end) |s| s.toIndex(end_of_file) else extremities.end + 1,
+            .start = if (self.start) |s| s.toIndex(last_index) else extremities.start,
+            .end = if (self.end) |s| s.toIndex(last_index + 1) else extremities.end + 1,
         };
     }
 };

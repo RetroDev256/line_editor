@@ -135,8 +135,7 @@ fn runInsert(self: *Runner, insert: parser.Insert) !void {
 }
 
 fn runLine(self: *Runner, line: Number) !void {
-    // converting between 1 based and 0 based indexing
-    self.line = line.toIndex(self.buffer.lastIndex()) -| 1;
+    self.line = line.toIndex(self.buffer.lastIndex());
 }
 
 fn runDelete(self: *Runner, range: ?Range) !void {
@@ -164,18 +163,11 @@ fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
     const bounds = try self.resolveRange(1, substitution.range);
     self.line = bounds.start;
     const lines = try self.buffer.getLines(bounds);
-    var replacements: usize = 0;
     for (0..lines.len) |line_offset| {
         const line_number = bounds.start + line_offset;
         while (true) {
-            if (substitution.count) |max_lines| {
-                if (max_lines == .specific) {
-                    if (replacements >= max_lines.specific) return;
-                }
-            }
             const line = self.buffer.lines.items[line_number];
             if (regex.match(line)) |match| {
-                replacements += 1;
                 const changed = try std.fmt.allocPrint(self.alloc, "{s}{s}{s}", .{
                     line[0..match.start], substitution.replacement, line[match.end..],
                 });

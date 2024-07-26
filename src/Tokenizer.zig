@@ -73,7 +73,7 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 's' => {
                     result.tag = .substitute_cmd;
-                    self.index += 1;
+                    self.index += 1; // skip past for next token
                     break;
                 },
                 '0'...'9' => {
