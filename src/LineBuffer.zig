@@ -14,23 +14,28 @@ pub fn deinit(self: *@This(), alloc: Allocator) void {
 }
 
 pub fn insertLine(self: *@This(), alloc: Allocator, line_number: usize, text: []const u8) !void {
-    // + 1 because we can insert at the end of the file
-    if (line_number > self.lastIndex() + 1) return error.IndexOutOfBounds;
+    // we don't check >= because we can insert after the buffer
+    if (line_number > self.length()) return error.IndexOutOfBounds;
     const owned_text = try self.store(alloc, text);
     return self.lines.insert(alloc, line_number, owned_text);
 }
 
-pub fn lastIndex(self: @This()) usize {
-    return self.lines.items.len -| 1;
+pub fn lastIndex(self: @This()) ?usize {
+    if (self.length() == 0) return null;
+    return self.lines.items.len - 1;
+}
+
+pub fn length(self: @This()) usize {
+    return self.lines.items.len;
 }
 
 pub fn getLines(self: @This(), range: BoundedRange) ![]const []const u8 {
-    try range.check(self.lastIndex());
+    try range.check(self.length());
     return self.lines.items[range.start..range.end];
 }
 
 pub fn deleteLines(self: *@This(), range: BoundedRange) !void {
-    try range.check(self.lastIndex());
+    try range.check(self.length());
     self.lines.replaceRangeAssumeCapacity(range.start, range.end - range.start, &.{});
 }
 
@@ -45,7 +50,7 @@ pub fn appendFile(self: *@This(), alloc: Allocator, file_name: []const u8) !void
 }
 
 pub fn save(self: @This(), file_name: []const u8, range: BoundedRange) !void {
-    try range.check(self.lastIndex());
+    try range.check(self.length());
     const file = try std.fs.cwd().createFile(file_name, .{});
     defer file.close();
     for (try self.getLines(range), 0..) |text, line| {

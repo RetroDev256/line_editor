@@ -3,17 +3,19 @@ pub const Number = union(enum) {
     specific: usize, // 123...
     infinity, // $
 
-    pub fn toIndex(self: Number, end_of_file: usize) usize {
+    pub fn toIndex(self: Number, length: usize) ?usize {
         return switch (self) {
             .specific => |line_number| line_number,
-            .infinity => end_of_file,
+            .infinity => if (length == 0) null else length - 1,
         };
     }
 
     // used for converting between 0 based and 1 based array indexing
     pub fn dec(self: Number) Number {
         return switch (self) {
-            .specific => |line_number| .{ .specific = line_number -| 1 },
+            // we only use this on already incremented numbers, in the
+            // exclusive range domain, so this won't overflow
+            .specific => |line_number| .{ .specific = line_number - 1 },
             .infinity => .infinity,
         };
     }
@@ -30,19 +32,20 @@ pub const BoundedRange = struct {
     start: usize,
     end: usize,
 
-    pub fn fromIndex(index: usize) @This() {
-        return .{ .start = index, .end = index + 1 };
+    pub fn complete(length: usize) @This() {
+        return .{ .start = 0, .end = length };
     }
-
-    pub fn clamp(self: @This(), max_index: usize) @This() {
+    pub fn fromIndex(index: usize, distance: usize) @This() {
+        return .{ .start = index, .end = index + distance };
+    }
+    pub fn clamp(self: @This(), length: usize) @This() {
         return .{
-            .start = @min(self.start, max_index + 1),
-            .end = @min(self.end, max_index + 1),
+            .start = @min(self.start, length),
+            .end = @min(self.end, length),
         };
     }
-
-    pub fn check(self: @This(), max: usize) !void {
-        if (self.start > max or self.end > max + 1) return error.RangeOutOfBounds;
+    pub fn check(self: @This(), length: usize) !void {
+        if (self.start >= length or self.end > length) return error.RangeOutOfBounds;
         if (self.start > self.end) return error.InvalidRange;
     }
 };
@@ -52,10 +55,21 @@ pub const Range = struct {
     start: ?Number,
     end: ?Number,
 
-    pub fn toIndexes(self: Range, extremities: BoundedRange, last_index: usize) BoundedRange {
-        return .{
-            .start = if (self.start) |s| s.toIndex(last_index) else extremities.start,
-            .end = if (self.end) |s| s.toIndex(last_index + 1) else extremities.end + 1,
-        };
+    pub fn toBounded(self: Range, length: usize) BoundedRange {
+        if (length == 0) {
+            return BoundedRange.complete(0);
+        } else {
+            const complete = BoundedRange.complete(length);
+            // unwrapping the optionals is guarunteed safe
+            // because we checked that the length was not 0
+            return .{
+                .start = if (self.start) |s| blk: {
+                    break :blk s.toIndex(length - 1).?;
+                } else complete.start,
+                .end = if (self.end) |s| blk: {
+                    break :blk s.toIndex(length).?;
+                } else complete.end,
+            };
+        }
     }
 };

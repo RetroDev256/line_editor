@@ -22,6 +22,7 @@ pub const Write = struct {
 
 pub const Command = union(enum) {
     none,
+    blank,
     quit,
     delete: ?Range,
     print: ?Range,
@@ -56,7 +57,9 @@ fn eat(tokenizer: *Tokenizer, expected: Tokenizer.Token.Tag) ?Tokenizer.Token {
 
 // sub_arg or other_string
 fn parseString(tokenizer: *Tokenizer) ?[]const u8 {
-    if (eat(tokenizer, .sub_arg) orelse eat(tokenizer, .other_string)) |token| {
+    if (eat(tokenizer, .sub_arg)) |token| {
+        return tokenizer.buffer[token.loc.start..token.loc.end];
+    } else if (eat(tokenizer, .other_string)) |token| {
         return tokenizer.buffer[token.loc.start..token.loc.end];
     } else return null;
 }
@@ -121,13 +124,10 @@ fn parseQuitCmd(source: []const u8) ?Command {
 fn parseDeleteOrPrintCmd(source: []const u8) ?Command {
     var toker = Tokenizer.init(source);
     const range = parseRange(&toker);
-    const command = toker.next();
-    if (toker.next().tag == .none) {
-        return switch (command.tag) {
-            .print_cmd => Command{ .print = range },
-            .delete_cmd => Command{ .delete = range },
-            else => null, // sadge
-        };
+    if (eat(&toker, .print_cmd)) |_| {
+        if (eat(&toker, .none)) |_| return Command{ .print = range };
+    } else if (eat(&toker, .delete_cmd)) |_| {
+        if (eat(&toker, .none)) |_| return Command{ .delete = range };
     }
     return null;
 }
@@ -190,6 +190,12 @@ fn parseLineCmd(source: []const u8) ?Command {
     }
     return null;
 }
+// EOF
+fn parseBlank(source: []const u8) ?Command {
+    var toker = Tokenizer.init(source);
+    if (eat(&toker, .none)) |_| return .blank;
+    return null;
+}
 
 pub fn parse(source: []const u8) Command {
     if (parseQuitCmd(source)) |command| return command;
@@ -198,5 +204,6 @@ pub fn parse(source: []const u8) Command {
     if (parseInsertCmd(source)) |command| return command;
     if (parseSubstitutionCmd(source)) |command| return command;
     if (parseLineCmd(source)) |command| return command;
+    if (parseBlank(source)) |command| return command;
     return .none;
 }

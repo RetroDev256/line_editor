@@ -13,6 +13,25 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(exe);
 
+    // some optimizations
+    if (optimize == .ReleaseFast or optimize == .ReleaseSmall) {
+        exe.root_module.omit_frame_pointer = true;
+        exe.root_module.strip = true;
+        exe.dead_strip_dylibs = true;
+
+        exe.root_module.error_tracing = false;
+        exe.root_module.link_libc = false;
+        exe.root_module.link_libcpp = false;
+        exe.root_module.red_zone = false;
+        exe.root_module.sanitize_c = false;
+        exe.root_module.sanitize_thread = false;
+        exe.root_module.single_threaded = true;
+        exe.root_module.stack_check = false;
+        exe.root_module.stack_protector = false;
+        exe.root_module.unwind_tables = false;
+        exe.formatted_panics = false;
+    }
+
     // run step
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());

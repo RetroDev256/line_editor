@@ -77,10 +77,11 @@ pub fn run(self: *Runner) !void {
 fn switchCommands(self: *Runner, command: parser.Command) !bool {
     var should_exit: bool = false;
     switch (command) {
-        .none => {},
+        .blank => {},
+        .none => return error.CommandNotRecognized,
         .delete => |delete| try self.runDelete(delete),
         .insert => |insert| try self.runInsert(insert),
-        .line => |line| try self.runLine(line),
+        .line => |line| self.runLine(line),
         .print => |print| try self.runPrint(print),
         .substitution => |substitution| try self.runSubstitution(substitution),
         .write => |write| try self.runWrite(write),
@@ -110,6 +111,7 @@ fn printCommandPrompt(self: *const Runner) !void {
 
 fn handleError(self: *const Runner, err: anyerror) !void {
     const string = switch (err) {
+        error.CommandNotRecognized => "command not recognized",
         // from the write or write & save commands
         error.NoOutputSpecified => "no output filename specified",
         // from the substitution command
@@ -117,7 +119,7 @@ fn handleError(self: *const Runner, err: anyerror) !void {
         // from LineBuffer
         error.InvalidRange => "range has negative length",
         error.RangeOutOfBounds => "range falls outside of file",
-        error.IndexOutOfBounds => "index out of bounds",
+        error.IndexOutOfBounds => "index is out of bounds",
         // not our problem
         else => return err,
     };
@@ -125,7 +127,7 @@ fn handleError(self: *const Runner, err: anyerror) !void {
 }
 
 fn runInsert(self: *Runner, insert: parser.Insert) !void {
-    if (insert.line) |line| try self.runLine(line);
+    if (insert.line) |line| self.runLine(line);
     if (insert.text) |line_text| {
         try self.buffer.insertLine(self.alloc, self.line, line_text);
         self.line += 1;
@@ -134,20 +136,24 @@ fn runInsert(self: *Runner, insert: parser.Insert) !void {
     }
 }
 
-fn runLine(self: *Runner, line: Number) !void {
-    self.line = line.toIndex(self.buffer.lastIndex());
+fn runLine(self: *Runner, line: Number) void {
+    // the one exception - if there are no lines, we don't need to
+    // be within the range of all the lines. We can be at line 0.
+    self.line = line.toIndex(self.buffer.length()) orelse 0;
 }
 
 fn runDelete(self: *Runner, range: ?Range) !void {
     // no range? only one line.
-    const bounds = try self.resolveRange(1, range);
+    const default = BoundedRange.fromIndex(self.line, 1);
+    const bounds = self.resolveRange(default, range);
     self.line = bounds.start;
     try self.buffer.deleteLines(bounds);
 }
 
 fn runPrint(self: *Runner, range: ?Range) !void {
     // by default print 16 lines (if we can), completely arbitrary
-    const bounds = try self.resolveRange(16, range);
+    const default = BoundedRange.fromIndex(self.line, 16);
+    const bounds = self.resolveRange(default, range);
     const lines = try self.buffer.getLines(bounds);
     self.line = bounds.start + lines.len;
     for (lines, 0..) |line, offset| {
@@ -160,7 +166,8 @@ fn runPrint(self: *Runner, range: ?Range) !void {
 fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
     const regex = mvzr.compile(substitution.pattern) orelse return error.InvalidRegex;
     // if no range was specified, replace only on the current line
-    const bounds = try self.resolveRange(1, substitution.range);
+    const default = BoundedRange.fromIndex(self.line, 1);
+    const bounds = self.resolveRange(default, substitution.range);
     self.line = bounds.start;
     const lines = try self.buffer.getLines(bounds);
     for (0..lines.len) |line_offset| {
@@ -172,8 +179,7 @@ fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
                     line[0..match.start], substitution.replacement, line[match.end..],
                 });
                 defer self.alloc.free(changed);
-                const replaced_line_range = .{ .start = line_number, .end = line_number + 1 };
-                try self.buffer.deleteLines(replaced_line_range);
+                try self.buffer.deleteLines(BoundedRange.fromIndex(line_number, 1));
                 try self.buffer.insertLine(self.alloc, line_number, changed);
             } else break;
         }
@@ -186,18 +192,14 @@ fn runWrite(self: *Runner, write: parser.Write) !void {
         // specifically for saving files, we want to default to
         // saving the entire file, not just one line if we don't
         // specify a line.
-        const extremities = .{ .start = 0, .end = self.buffer.lastIndex() + 1 };
-        const range = if (write.range) |resolved| blk: {
-            break :blk resolved.toIndexes(extremities, self.buffer.lastIndex());
-        } else BoundedRange{ .start = 0, .end = self.buffer.lastIndex() + 1 };
+        const default = BoundedRange.complete(self.buffer.length());
+        const range = self.resolveRange(default, write.range);
         try self.buffer.save(file_name, range);
     } else return error.NoOutputSpecified;
 }
 
-fn resolveRange(self: *const Runner, default_length: usize, range: ?Range) !BoundedRange {
-    const unclamped = if (range) |resolved| blk: {
-        const extremities = .{ .start = 0, .end = self.buffer.lastIndex() };
-        break :blk resolved.toIndexes(extremities, self.buffer.lastIndex());
-    } else BoundedRange{ .start = self.line, .end = self.line + default_length };
-    return unclamped.clamp(self.buffer.lastIndex());
+fn resolveRange(self: *const Runner, default: BoundedRange, range: ?Range) BoundedRange {
+    if (range) |resolved| {
+        return resolved.toBounded(self.buffer.length());
+    } else return default.clamp(self.buffer.length());
 }

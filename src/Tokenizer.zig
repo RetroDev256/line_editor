@@ -127,7 +127,10 @@ pub fn next(self: *Tokenizer) Token {
                         state = .other_string;
                     }
                 },
-                else => state = .other_string,
+                else => {
+                    result.tag = .other_string;
+                    state = .other_string;
+                },
             },
             .sub_arg => switch (c) {
                 '\\' => sub_arg_escaped = !sub_arg_escaped,
