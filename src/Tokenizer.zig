@@ -19,6 +19,7 @@ pub const Token = struct {
         write_cmd, // w
         write_quit_cmd, // wq
         substitute_cmd, // s
+        help_cmd, // h
 
         insert, // starts with .
         sub_arg, // starts with / and delimited by /
@@ -50,6 +51,32 @@ const State = enum {
 };
 
 // peek by duping the struct - it's light enough
+
+// updates the tokenizer if the expected token is a match,
+// and then returns the matching token.
+pub fn eat(self: *Tokenizer, expected: Token.Tag) ?Token {
+    var toker = self.*; // copy for peeking
+    const token = toker.next();
+    if (token.tag == expected) {
+        self.* = toker; // update the tokenizer
+        return token;
+    }
+    return null;
+}
+
+// method to help with parsing multiple consecutive tokens
+// updates the tokenizer and returns the list of tokens if they match
+pub fn eatMany(self: *Tokenizer, comptime expect: anytype) ?[expect.len]Token {
+    var result_tokens: [expect.len]Token = undefined;
+    var toker = self.*; // copy for peeking
+    inline for (expect, &result_tokens) |tok_exp, *result| {
+        if (toker.eat(tok_exp)) |match| {
+            result.* = match;
+        } else return null;
+    }
+    self.* = toker; // update the tokenizer
+    return result_tokens;
+}
 
 pub fn next(self: *Tokenizer) Token {
     var state: State = .start;
@@ -94,6 +121,10 @@ pub fn next(self: *Tokenizer) Token {
                 },
                 'w' => {
                     result.tag = .write_cmd;
+                    state = .command;
+                },
+                'h' => {
+                    result.tag = .help_cmd;
                     state = .command;
                 },
                 '/' => {

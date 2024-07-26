@@ -6,16 +6,18 @@ pub const Number = union(enum) {
     pub fn toIndex(self: Number, length: usize) ?usize {
         return switch (self) {
             .specific => |line_number| line_number,
-            .infinity => if (length == 0) null else length - 1,
+            .infinity => if (length == 0) return null else length - 1,
         };
     }
 
-    // used for converting between 0 based and 1 based array indexing
-    pub fn dec(self: Number) Number {
+    // used for converting between 0 indexed and 1 indexed array indexing
+    pub fn dec(self: Number) !Number {
         return switch (self) {
-            // we only use this on already incremented numbers, in the
-            // exclusive range domain, so this won't overflow
-            .specific => |line_number| .{ .specific = line_number - 1 },
+            .specific => |line_number| blk: {
+                if (line_number == 0) {
+                    return error.NumberUnderflow;
+                } else break :blk .{ .specific = line_number - 1 };
+            },
             .infinity => .infinity,
         };
     }
@@ -50,7 +52,7 @@ pub const BoundedRange = struct {
     }
 };
 
-/// 'start' is inclusive, 'end' is not inclusive
+/// 'start' is inclusive, 'end' is also inclusive
 pub const Range = struct {
     start: ?Number,
     end: ?Number,
@@ -63,12 +65,9 @@ pub const Range = struct {
             // unwrapping the optionals is guarunteed safe
             // because we checked that the length was not 0
             return .{
-                .start = if (self.start) |s| blk: {
-                    break :blk s.toIndex(length - 1).?;
-                } else complete.start,
-                .end = if (self.end) |s| blk: {
-                    break :blk s.toIndex(length).?;
-                } else complete.end,
+                .start = if (self.start) |s| s.toIndex(length).? else complete.start,
+                // convert to noninclusive range
+                .end = if (self.end) |e| e.toIndex(length).? + 1 else complete.end,
             };
         }
     }
