@@ -5,21 +5,18 @@ const Allocator = std.mem.Allocator;
 const arg_parser = @import("arg_parser.zig");
 const Runner = @import("Runner.zig");
 
-// disable logging to anything but error,
-// due to mvzr using std.log
-pub const std_options: std.Options = .{ .log_level = .err };
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const safe = builtin.mode == .Debug or builtin.mode == .ReleaseSafe;
-    defer if (gpa.deinit() == .leak and safe) @panic("LEAK!");
+    defer if (safe and gpa.deinit() == .leak) @panic("LEAK!");
     const alloc = gpa.allocator();
 
     const args = try std.process.argsAlloc(alloc);
     defer std.process.argsFree(alloc, args);
 
-    const options = arg_parser.parseCmdLine(args);
-    try run(alloc, options);
+    if (try arg_parser.parseCmdLine(args)) |options| {
+        try run(alloc, options);
+    }
 }
 
 fn run(alloc: Allocator, options: arg_parser.Options) !void {

@@ -44,24 +44,24 @@ const State = enum {
 // parser functions update the tokenizer if they match what they are parsing
 
 // sub_arg or other_string
-fn parseString(tokenizer: *Tokenizer) ?[]const u8 {
-    if (tokenizer.eat(.sub_arg)) |token| {
-        return tokenizer.buffer[token.loc.start..token.loc.end];
-    } else if (tokenizer.eat(.other_string)) |token| {
-        return tokenizer.buffer[token.loc.start..token.loc.end];
+fn parseString(toker: *Tokenizer) ?[]const u8 {
+    if (toker.eat(.sub_arg)) |token| {
+        return toker.buffer[token.loc.start..token.loc.end];
+    } else if (toker.eat(.other_string)) |token| {
+        return toker.buffer[token.loc.start..token.loc.end];
     } else return null;
 }
 // 123..., or $ for infinity
-fn parseNumber(tokenizer: *Tokenizer) ?Number {
+fn parseNumber(toker: *Tokenizer) ?Number {
     // operate on a copy of tokenizer - don't know if we can parse what we get
-    var toker = tokenizer.*;
-    if (toker.eat(.number)) |token| {
-        const num_str = toker.buffer[token.loc.start..token.loc.end];
+    var toker_copy = toker.*;
+    if (toker_copy.eat(.number)) |token| {
+        const num_str = toker_copy.buffer[token.loc.start..token.loc.end];
         if (std.fmt.parseInt(usize, num_str, 10)) |number| {
-            tokenizer.* = toker; // update the tokenizer
+            toker.* = toker_copy; // update the tokenizer
             return .{ .specific = number };
         } else |_| {}
-    } else if (tokenizer.eat(.range_file_end)) |_| { // no chance of parse failure
+    } else if (toker.eat(.range_file_end)) |_| { // no chance of parse failure
         return .infinity;
     }
     return null;
@@ -70,20 +70,20 @@ fn parseNumber(tokenizer: *Tokenizer) ?Number {
 // the difference is that this changes the number so that
 // we can index in a 0 indexed array, while the user interface
 // makes things seem like they are indexed from 1
-fn parseIndex(tokenizer: *Tokenizer) !?Number {
-    if (parseNumber(tokenizer)) |number| {
+fn parseIndex(toker: *Tokenizer) !?Number {
+    if (parseNumber(toker)) |number| {
         return number.dec() catch |err| switch (err) {
             error.NumberUnderflow => return error.OneBasedIndexIsZero,
         };
     } else return null;
 }
 // NUM? SEP NUM?, or NUM
-fn parseRange(tokenizer: *Tokenizer) !?Range {
-    const first = parseIndex(tokenizer) catch |err| switch (err) {
+fn parseRange(toker: *Tokenizer) !?Range {
+    const first = parseIndex(toker) catch |err| switch (err) {
         error.OneBasedIndexIsZero => return error.RangeStartIsZero,
     };
-    if (tokenizer.eat(.range_seperator)) |_| {
-        const second = parseIndex(tokenizer) catch |err| switch (err) {
+    if (toker.eat(.range_seperator)) |_| {
+        const second = parseIndex(toker) catch |err| switch (err) {
             error.OneBasedIndexIsZero => return error.RangeEndIsZero,
         };
         return .{ .start = first, .end = second };
@@ -94,8 +94,7 @@ fn parseRange(tokenizer: *Tokenizer) !?Range {
 }
 
 // QUIT EOF
-fn parseQuitOrHelpCmd(source: []const u8) ?Command {
-    var toker = Tokenizer.init(source);
+fn parseQuitOrHelpCmd(toker: *Tokenizer) ?Command {
     if (toker.eatMany(.{ .quit_cmd, .none })) |_| {
         return .quit;
     } else if (toker.eatMany(.{ .help_cmd, .none })) |_| {
@@ -103,48 +102,57 @@ fn parseQuitOrHelpCmd(source: []const u8) ?Command {
     } else return null;
 }
 // RANGE? DELETE/PRINT EOF
-fn parseDeleteOrPrintCmd(source: []const u8) !?Command {
-    var toker = Tokenizer.init(source);
-    const range = try parseRange(&toker);
-    if (toker.eatMany(.{ .print_cmd, .none })) |_| {
+fn parseDeleteOrPrintCmd(toker: *Tokenizer) !?Command {
+    var toker_copy = toker.*;
+    const range = try parseRange(&toker_copy);
+    if (toker_copy.eatMany(.{ .print_cmd, .none })) |_| {
+        toker.* = toker_copy;
         return Command{ .print = range };
-    } else if (toker.eatMany(.{ .delete_cmd, .none })) |_| {
+    } else if (toker_copy.eatMany(.{ .delete_cmd, .none })) |_| {
+        toker.* = toker_copy;
         return Command{ .delete = range };
     } else return null;
 }
 // RANGE? WRITE/WRITEQUIT STRING? EOF
-fn parseWriteorWriteQuitCmd(source: []const u8) !?Command {
-    var toker = Tokenizer.init(source);
-    const range = try parseRange(&toker);
-    if (toker.eat(.write_cmd)) |_| {
-        const file_out = parseString(&toker);
+fn parseWriteorWriteQuitCmd(toker: *Tokenizer) !?Command {
+    var toker_copy = toker.*;
+    const range = try parseRange(&toker_copy);
+    if (toker_copy.eat(.write_cmd)) |_| {
+        const file_out = parseString(&toker_copy);
+        toker.* = toker_copy;
         return Command{ .write = .{ .range = range, .file_out = file_out } };
-    } else if (toker.eat(.write_quit_cmd)) |_| {
-        const file_out = parseString(&toker);
+    } else if (toker_copy.eat(.write_quit_cmd)) |_| {
+        const file_out = parseString(&toker_copy);
+        toker.* = toker_copy;
         return Command{ .write_quit = .{ .range = range, .file_out = file_out } };
     }
     return null;
 }
 // NUMBER? INSERT EOF
-fn parseInsertCmd(source: []const u8) !?Command {
-    var toker = Tokenizer.init(source);
-    const line = try parseIndex(&toker);
-    if (toker.eatMany(.{ .insert, .none })) |insert_tokens| {
+fn parseInsertCmd(toker: *Tokenizer) !?Command {
+    var toker_copy = toker.*;
+    const line = try parseIndex(&toker_copy);
+    if (toker_copy.eatMany(.{ .insert, .none })) |insert_tokens| {
         const insert = insert_tokens[0];
-        const text = toker.buffer[insert.loc.start..insert.loc.end];
+        const text = toker_copy.buffer[insert.loc.start..insert.loc.end];
         if (text.len > 0) {
+            toker.* = toker_copy;
             return Command{ .insert = .{ .line = line, .text = text } };
-        } else return Command{ .insert = .{ .line = line, .text = null } };
+        } else {
+            toker.* = toker_copy;
+            return Command{ .insert = .{ .line = line, .text = null } };
+        }
     } else return null;
 }
 // RANGE? SUB STRING STRING NUMBER?
-fn parseSubstitutionCmd(source: []const u8) !?Command {
-    var toker = Tokenizer.init(source);
-    const range = try parseRange(&toker);
-    if (toker.eat(.substitute_cmd)) |_| {
-        if (parseString(&toker)) |pattern| {
-            if (parseString(&toker)) |replacement| {
-                if (toker.eat(.none)) |_| {
+fn parseSubstitutionCmd(toker: *Tokenizer) !?Command {
+    var toker_copy = toker.*;
+    const range = try parseRange(&toker_copy);
+    if (toker_copy.eat(.substitute_cmd)) |_| {
+        if (parseString(&toker_copy)) |pattern| {
+            if (parseString(&toker_copy)) |replacement| {
+                if (toker_copy.eat(.none)) |_| {
+                    toker.* = toker_copy;
                     return Command{ .substitution = .{
                         .range = range,
                         .pattern = pattern,
@@ -157,31 +165,31 @@ fn parseSubstitutionCmd(source: []const u8) !?Command {
     return null;
 }
 // NUM EOF
-fn parseLineCmd(source: []const u8) !?Command {
-    var toker = Tokenizer.init(source);
-    if (try parseIndex(&toker)) |line_number| { // NUM
-        if (toker.eat(.none)) |_| { // EOF
+fn parseLineCmd(toker: *Tokenizer) !?Command {
+    var toker_copy = toker.*;
+    if (try parseIndex(&toker_copy)) |line_number| { // NUM
+        if (toker_copy.eat(.none)) |_| { // EOF
+            toker.* = toker_copy;
             return Command{ .line = line_number };
         }
     }
     return null;
 }
 // EOF
-fn parseBlank(source: []const u8) ?Command {
-    var toker = Tokenizer.init(source);
+fn parseBlank(toker: *Tokenizer) ?Command {
     if (toker.eat(.none)) |_| {
         return .blank;
-    }
-    return null;
+    } else return null;
 }
 
 pub fn parse(source: []const u8) !Command {
-    if (parseQuitOrHelpCmd(source)) |command| return command;
-    if (try parseDeleteOrPrintCmd(source)) |command| return command;
-    if (try parseWriteorWriteQuitCmd(source)) |command| return command;
-    if (try parseInsertCmd(source)) |command| return command;
-    if (try parseSubstitutionCmd(source)) |command| return command;
-    if (try parseLineCmd(source)) |command| return command;
-    if (parseBlank(source)) |command| return command;
+    var toker = Tokenizer.init(source);
+    if (parseQuitOrHelpCmd(&toker)) |command| return command;
+    if (try parseDeleteOrPrintCmd(&toker)) |command| return command;
+    if (try parseWriteorWriteQuitCmd(&toker)) |command| return command;
+    if (try parseInsertCmd(&toker)) |command| return command;
+    if (try parseSubstitutionCmd(&toker)) |command| return command;
+    if (try parseLineCmd(&toker)) |command| return command;
+    if (parseBlank(&toker)) |command| return command;
     return .none;
 }
