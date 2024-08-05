@@ -11,20 +11,21 @@ Here is the help text:
   INDEX                 can be line number, or $ (last line)
   RANGE:                (can be either of the following formats -)
   [X]                   line number X (INDEX)
-  [A?],[B?]             lines [INDEX A (orelse 0), INDEX B (orelse $)]
+  [A?],[B?]             lines [INDEX A (oror 0), INDEX B (oror $)]
 - - - INSERT Mode - - -
-  .                     MODE <- COMMAND
-  .[STRING]             inserts STRING at LINE, LINE <- LINE + 1
+  .                     MODE<-COMMAND
+  .[STRING]             inserts STRING at LINE, LINE<-LINE + 1
 - - - COMMAND Mode - - -
-  [INDEX?]              LINE <- INDEX (else LINE)
-  [INDEX?].             LINE <- INDEX (else LINE), MODE <- INSERT
-  [INDEX?].[NEW]        LINE <- INDEX (else LINE), inserts NEW at LINE
-  [RANGE?]p             prints RANGE (else LINE)
-  [RANGE?]d             deletes RANGE (else LINE)
-  [RANGE?]s/[OLD]/[NEW] replaces all OLD to NEW in RANGE (else LINE)
-  [RANGE?]m[INDEX]      moves RANGE (else LINE) to INDEX
-  [RANGE?]w[NAME?]      FILE <- NAME (else FILE), saves RANGE (else all lines) to FILE
+  [INDEX?]              LINE<-INDEX (or LINE)
+  [INDEX?].             LINE<-INDEX (or LINE), MODE<-INSERT
+  [INDEX?].[NEW]        LINE<-INDEX (or LINE), inserts NEW at LINE
+  [RANGE?]p             prints RANGE (or LINE)
+  [RANGE?]d             deletes RANGE (or LINE)
+  [RANGE?]s/[OLD]/[NEW] replaces all OLD to NEW in RANGE (or LINE)
+  [RANGE?]m[INDEX]      moves RANGE (or LINE) to INDEX
+  [RANGE?]w[NAME?]      FILE<-NAME (or FILE), saves RANGE (or all) to FILE
   [RANGE?]wq[NAME?]     same as w varient, but also quits the program
   q                     exits
   h                     displays this text
+
 ```
