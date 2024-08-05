@@ -1,18 +1,24 @@
+const Self = @This();
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+
+buffer: []const u8,
+index: usize = 0,
+
 pub const Token = struct {
-    tag: Tag = .none,
+    tag: Tag = ._none,
     loc: Loc = .{},
 
-    pub const Loc = struct {
+    const Loc = struct {
         start: usize = 0,
         end: usize = 0,
     };
 
     pub const Tag = enum {
-        none,
-
+        _none,
         range_seperator, // ,
         range_file_end, // $
-
         delete_cmd, // d
         print_cmd, // p
         quit_cmd, // q
@@ -20,162 +26,103 @@ pub const Token = struct {
         write_quit_cmd, // wq
         substitute_cmd, // s
         help_cmd, // h
-
         insert_cmd, // starts with .
         move_cmd, // m
-
-        sub_arg, // starts with / and delimited by /
-
+        string, // starts with / and delimited by /
         number, // 123456...
-        other_string, // anything else really
     };
+
+    pub fn data(self: Token, source: []const u8) []const u8 {
+        return source[self.loc.start..self.loc.end];
+    }
 };
 
-const Tokenizer = @This();
+pub fn tokenize(alloc: Allocator, source: []const u8) ![]Token {
+    var tokens = std.ArrayList(Token).init(alloc);
+    defer tokens.deinit();
 
-buffer: []const u8,
-index: usize = 0,
+    var self: Self = .{ .buffer = source };
+    while (true) {
+        const token = self.next();
+        if (token.tag == ._none) break;
+        try tokens.append(token);
+    }
 
-pub fn init(source: []const u8) @This() {
-    return .{ .buffer = source };
+    return tokens.toOwnedSlice();
 }
 
 const State = enum {
     start,
     /// delimited by anything but 0...9
     number,
-    /// delimited by whitespace
-    command,
-    /// delimited by /
-    sub_arg,
-    /// not limited
-    other_string,
+    /// either the w, or the wq command
+    write,
+    /// delimited by eof
+    eof_string,
 };
 
-// peek by duping the struct - it's light enough
-
-// updates the tokenizer if the expected token is a match,
-// and then returns the matching token.
-pub fn eat(self: *Tokenizer, expected: Token.Tag) ?Token {
-    var toker = self.*; // copy for peeking
-    const token = toker.next();
-    if (token.tag == expected) {
-        self.* = toker; // update the tokenizer
-        return token;
-    }
-    return null;
-}
-
-// method to help with parsing multiple consecutive tokens
-// updates the tokenizer and returns the list of tokens if they match
-pub fn eatMany(self: *Tokenizer, comptime expect: anytype) ?[expect.len]Token {
-    var result_tokens: [expect.len]Token = undefined;
-    var toker = self.*; // copy for peeking
-    inline for (expect, &result_tokens) |tok_exp, *result| {
-        if (toker.eat(tok_exp)) |match| {
-            result.* = match;
-        } else return null;
-    }
-    self.* = toker; // update the tokenizer
-    return result_tokens;
-}
-
-pub fn next(self: *Tokenizer) Token {
+fn next(self: *Self) Token {
     var state: State = .start;
     var result: Token = .{};
     result.loc.start = self.index;
-    var sub_arg_escaped: bool = false; // \
+
     while (self.index < self.buffer.len) {
         const c = self.buffer[self.index];
         switch (state) {
             .start => switch (c) {
-                ' ', '\n', '\t', 'r' => {}, // initial whitespace skipped
-                ',' => {
-                    result.tag = .range_seperator;
+                ' ', '\t', '\r', '\n' => {}, // skip whitespace
+                ',', '$', 'd', 'p', 'q', 'h' => {
+                    switch (c) {
+                        ',' => result.tag = .range_seperator,
+                        '$' => result.tag = .range_file_end,
+                        'd' => result.tag = .delete_cmd,
+                        'p' => result.tag = .print_cmd,
+                        'q' => result.tag = .quit_cmd,
+                        'h' => result.tag = .help_cmd,
+                        else => unreachable,
+                    }
                     self.index += 1; // skip past for next token
                     break;
                 },
-                '$' => {
-                    result.tag = .range_file_end;
-                    self.index += 1; // skip past for next token
-                    break;
-                },
-                's' => {
-                    result.tag = .substitute_cmd;
-                    self.index += 1; // skip past for next token
-                    break;
+                's', '.' => {
+                    switch (c) {
+                        's' => result.tag = .substitute_cmd,
+                        '.' => result.tag = .insert_cmd,
+                        else => unreachable,
+                    }
+                    result.loc.start += 1; // location IS the string
+                    state = .eof_string;
                 },
                 'm' => {
                     result.tag = .move_cmd;
-                    self.index += 1; // skip past for next token
-                    break;
+                    result.loc.start += 1; // location IS the number
+                    state = .number;
+                },
+                'w' => {
+                    result.tag = .write_cmd;
+                    result.loc.start += 1; // location IS the string
+                    state = .write;
                 },
                 '0'...'9' => {
                     result.tag = .number;
                     state = .number;
                 },
-                'd' => {
-                    result.tag = .delete_cmd;
-                    state = .command;
-                },
-                'p' => {
-                    result.tag = .print_cmd;
-                    state = .command;
-                },
-                'q' => {
-                    result.tag = .quit_cmd;
-                    state = .command;
-                },
-                'w' => {
-                    result.tag = .write_cmd;
-                    state = .command;
-                },
-                'h' => {
-                    result.tag = .help_cmd;
-                    state = .command;
-                },
-                '/' => {
-                    result.tag = .sub_arg;
-                    state = .sub_arg; // delimited by another /
-                    result.loc.start += 1; // we don't want it to be in the range
-                },
-                '.' => {
-                    result.tag = .insert_cmd;
-                    state = .other_string; // anything after gets consumed
-                    result.loc.start += 1; // we don't want it to be in the range
-                },
-                else => {
-                    result.tag = .other_string;
-                    state = .other_string;
-                },
+                else => state = .eof_string,
             },
             .number => switch (c) {
+                ' ', '\t', '\r', '\n' => {}, // skip whitespace
                 '0'...'9' => {},
                 else => break,
             },
-            .command => switch (c) {
-                ' ', '\t', '\n', '\r', '/' => {
-                    self.index += 1; // end of command
-                    break;
-                },
+            .write => switch (c) {
                 'q' => {
-                    if (result.tag == .write_cmd) {
-                        result.tag = .write_quit_cmd;
-                    } else {
-                        state = .other_string;
-                    }
+                    result.tag = .write_quit_cmd;
+                    result.loc.start += 1; // location IS the string
+                    state = .eof_string;
                 },
-                else => {
-                    result.tag = .other_string;
-                    state = .other_string;
-                },
+                else => state = .eof_string,
             },
-            .sub_arg => switch (c) {
-                '\\' => sub_arg_escaped = !sub_arg_escaped,
-                '/' => if (!sub_arg_escaped) break,
-                else => sub_arg_escaped = false,
-            },
-            .other_string => {}, // chew up symbols forever
+            .eof_string => {}, // chew up symbols forever
         }
         self.index += 1;
     }
