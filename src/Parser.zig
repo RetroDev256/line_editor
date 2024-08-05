@@ -89,7 +89,7 @@ fn substituteCmd(self: *Self, token_data: []const u8) !Command {
     };
     const before = token_data[1 .. split + 1];
     const after = token_data[split + 2 ..];
-    return switch (self.lineTarget()) {
+    return switch (try self.lineTarget()) {
         .none => .{ .sub = .{ .before = before, .after = after } },
         .index => |index| .{ .sub_line = .{ .before = before, .after = after, .dest = index } },
         .range => |range| .{ .sub_range = .{ .before = before, .after = after, .dest = range } },
@@ -98,15 +98,15 @@ fn substituteCmd(self: *Self, token_data: []const u8) !Command {
 
 fn insertCmd(self: *Self, token_data: []const u8) !Command {
     if (token_data.len == 0) {
-        return switch (self.lineTarget()) {
+        return switch (try self.lineTarget()) {
             .none => .insert_mode,
-            .insert => |index| .{ .insert_mode_line = index },
+            .index => |index| .{ .insert_mode_line = index },
             .range => error.MalformedCommand,
         };
     } else {
-        return switch (self.lineTarget()) {
+        return switch (try self.lineTarget()) {
             .none => .{ .insert_text = token_data },
-            .insert => |index| .{ .insert_text_line = .{
+            .index => |index| .{ .insert_text_line = .{
                 .dest = index,
                 .text = token_data,
             } },
@@ -117,19 +117,19 @@ fn insertCmd(self: *Self, token_data: []const u8) !Command {
 
 fn writeCmd(self: *Self, token_data: []const u8) !Command {
     if (token_data.len == 0) {
-        return switch (self.lineTarget()) {
+        return switch (try self.lineTarget()) {
             .none => .write_default,
             .index => |index| .{ .write_default_line = index },
             .range => |range| .{ .write_default_range = range },
         };
     } else {
-        return switch (self.lineTarget()) {
-            .none => .write,
-            .index => |index| Command{ .write_line = .{
+        return switch (try self.lineTarget()) {
+            .none => .{ .write = token_data },
+            .index => |index| .{ .write_line = .{
                 .source = index,
                 .file_out = token_data,
             } },
-            .range => |range| Command{ .write_range = .{
+            .range => |range| .{ .write_range = .{
                 .source = range,
                 .file_out = token_data,
             } },
@@ -139,19 +139,19 @@ fn writeCmd(self: *Self, token_data: []const u8) !Command {
 
 fn writeQuitCmd(self: *Self, token_data: []const u8) !Command {
     if (token_data.len == 0) {
-        return switch (self.lineTarget()) {
+        return switch (try self.lineTarget()) {
             .none => .write_quit_default,
             .index => |index| .{ .write_quit_default_line = index },
             .range => |range| .{ .write_quit_default_range = range },
         };
     } else {
-        return switch (self.lineTarget()) {
-            .none => .write_quit,
-            .index => |index| Command{ .write_quit_line = .{
+        return switch (try self.lineTarget()) {
+            .none => .{ .write_quit = token_data },
+            .index => |index| .{ .write_quit_line = .{
                 .source = index,
                 .file_out = token_data,
             } },
-            .range => |range| Command{ .write_quit_range = .{
+            .range => |range| .{ .write_quit_range = .{
                 .source = range,
                 .file_out = token_data,
             } },
@@ -161,7 +161,7 @@ fn writeQuitCmd(self: *Self, token_data: []const u8) !Command {
 
 fn moveCmd(self: *Self, token_data: []const u8) !Command {
     const dest = try parseIndex(token_data);
-    return switch (self.lineTarget()) {
+    return switch (try self.lineTarget()) {
         .none => .{ .move = dest },
         .index => |index| .{ .move_line = .{ .source = index, .dest = dest } },
         .range => |range| .{ .move_range = .{ .source = range, .dest = dest } },
@@ -169,7 +169,7 @@ fn moveCmd(self: *Self, token_data: []const u8) !Command {
 }
 
 fn printCmd(self: *Self) !Command {
-    return switch (self.lineTarget()) {
+    return switch (try self.lineTarget()) {
         .none => .print,
         .index => |index| .{ .print_line = index },
         .range => |range| .{ .print_range = range },
@@ -177,7 +177,7 @@ fn printCmd(self: *Self) !Command {
 }
 
 fn deleteCmd(self: *Self) !Command {
-    return switch (self.lineTarget()) {
+    return switch (try self.lineTarget()) {
         .none => .delete,
         .index => |index| .{ .delete_line = index },
         .range => |range| .{ .delete_range = range },
@@ -200,7 +200,7 @@ fn helpCmd(self: *Self) !Command {
 
 const LineTarget = union(enum) { none, index: Index, range: Range };
 
-fn lineTarget(self: *Self) LineTarget {
+fn lineTarget(self: *Self) !LineTarget {
     if (self.has_range_seperator) {
         return .{ .range = .{
             .start = self.starting_index,

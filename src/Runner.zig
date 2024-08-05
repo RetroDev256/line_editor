@@ -119,19 +119,58 @@ fn runCommand(self: *Self, source: []const u8) !void {
         .write_default => try self.runWriteDefault(),
         .write_default_line => |data| try self.runWriteDefaultLine(data),
         .write_default_range => |data| try self.runWriteDefaultRange(data),
-        .write_quit_default => try self.runWriteQuitDefault(),
-        .write_quit_default_line => |data| try self.runWriteQuitDefaultLine(data),
-        .write_quit_default_range => |data| try self.runWriteQuitDefaultRange(data),
-        .write => |data| try self.runWrite(data),
-        .write_line => |data| try self.runWriteLine(data),
-        .write_range => |data| try self.runWriteRange(data),
-        .write_quit => |data| try self.runWriteQuit(data),
-        .write_quit_line => |data| try self.runWriteQuitLine(data),
-        .write_quit_range => |data| try self.runWriteQuitRange(data),
-        .insert_mode => try self.runInsertMode(),
-        .insert_mode_line => |data| try self.runInsertModeLine(data),
-        .insert_text => |data| try self.runInsertText(data),
-        .insert_text_line => |data| try self.runInsertTextLine(data),
+        .write_quit_default => {
+            try self.runWriteDefault();
+            self.should_exit = true;
+        },
+        .write_quit_default_line => |data| {
+            try self.runWriteDefaultLine(data);
+            self.should_exit = true;
+        },
+        .write_quit_default_range => |data| {
+            try self.runWriteDefaultRange(data);
+            self.should_exit = true;
+        },
+        .write => |data| {
+            self.file_out = data;
+            try self.runWriteDefault();
+        },
+        .write_line => |data| {
+            self.file_out = data.file_out;
+            try self.runWriteDefaultLine(data.source);
+        },
+        .write_range => |data| {
+            self.file_out = data.file_out;
+            try self.runWriteDefaultRange(data.source);
+        },
+        .write_quit => |data| {
+            self.file_out = data;
+            try self.runWriteDefault();
+            self.should_exit = true;
+        },
+        .write_quit_line => |data| {
+            self.file_out = data.file_out;
+            try self.runWriteDefaultLine(data.source);
+            self.should_exit = true;
+        },
+        .write_quit_range => |data| {
+            self.file_out = data.file_out;
+            try self.runWriteDefaultRange(data.source);
+            self.should_exit = true;
+        },
+        .insert_mode => {
+            self.mode = .insert;
+        },
+        .insert_mode_line => |data| {
+            self.line = data;
+            self.mode = .insert;
+        },
+        .insert_text => |data| {
+            try self.buffer.insertLine(self.line, data);
+        },
+        .insert_text_line => |data| {
+            try self.buffer.insertLine(self.line, data.text);
+        },
         .sub => |data| try self.runSub(data),
         .sub_line => |data| try self.runSubLine(data),
         .sub_range => |data| try self.runSubRange(data),
@@ -234,68 +273,6 @@ fn runWriteDefaultRange(self: *Self, source: Range) !void {
     if (self.file_out) |file_name| {
         try self.buffer.saveRange(file_name, source);
     } else return error.NoOutputSpecified;
-}
-
-fn runWriteQuitDefault(self: *Self) !void {
-    try self.runWriteDefault();
-    self.should_exit = true;
-}
-
-fn runWriteQuitDefaultLine(self: *Self, source: Index) !void {
-    try self.runWriteDefaultLine(source);
-    self.should_exit = true;
-}
-
-fn runWriteQuitDefaultRange(self: *Self, source: Range) !void {
-    try self.runWriteDefaultRange(source);
-    self.should_exit = true;
-}
-
-fn runWrite(self: *Self, file_name: []const u8) !void {
-    self.file_out = file_name;
-    try self.runWriteDefault();
-}
-
-fn runWriteLine(self: *Self, data: Parser.WriteLine) !void {
-    self.file_out = data.file_out;
-    try self.runWriteDefaultLine(data.source);
-}
-
-fn runWriteRange(self: *Self, data: Parser.WriteRange) !void {
-    self.file_out = data.file_out;
-    try self.runWriteDefaultRange(data.source);
-}
-
-fn runWriteQuit(self: *Self, file_name: []const u8) !void {
-    try self.runWrite(file_name);
-    self.should_exit = true;
-}
-
-fn runWriteQuitLine(self: *Self, data: Parser.WriteLine) !void {
-    try self.runWriteLine(data);
-    self.should_exit = true;
-}
-
-fn runWriteQuitRange(self: *Self, data: Parser.WriteRange) !void {
-    try self.runWriteRange(data);
-    self.should_exit = true;
-}
-
-fn runInsertMode(self: *Self) !void {
-    self.mode = .insert;
-}
-
-fn runInsertModeLine(self: *Self, line: Index) !void {
-    self.line = line;
-    self.mode = .insert;
-}
-
-fn runInsertText(self: *Self, text: []const u8) !void {
-    try self.buffer.insertLine(self.line, text);
-}
-
-fn runInsertTextLine(self: *Self, data: Parser.InsertTextLine) !void {
-    try self.buffer.insertLine(self.line, data.text);
 }
 
 fn replace(self: *Self, line: []const u8, before: []const u8, after: []const u8) !?[]const u8 {
