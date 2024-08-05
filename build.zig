@@ -18,7 +18,7 @@ fn buildAll(b: *std.Build) void {
         const query = std.Build.parseTargetQuery(.{ .arch_os_abi = target_str });
         const package_target = b.resolveTargetQuery(query catch unreachable);
         const package_exe = b.addExecutable(.{
-            .name = "line_editor",
+            .name = "le",
             .root_source_file = b.path("src/main.zig"),
             .target = package_target,
             .optimize = optimize,
@@ -44,7 +44,7 @@ fn buildNative(b: *std.Build) void {
 
     // exe step
     const exe = b.addExecutable(.{
-        .name = "line_editor",
+        .name = "le",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
