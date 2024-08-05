@@ -343,3 +343,7 @@ fn runMoveRange(self: *Self, data: Parser.MoveRange) !void {
 fn runLine(self: *Self, line: Index) !void {
     self.line = line;
 }
+
+test {
+    _ = &std.testing.refAllDecls(@This());
+}

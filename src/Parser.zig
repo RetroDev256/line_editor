@@ -281,3 +281,27 @@ fn parseCommand(self: *Self) !?Command {
         return null;
     }
 }
+
+test {
+    _ = &std.testing.refAllDecls(@This());
+}
+
+fn handle(err: anyerror) !void {
+    return switch (err) {
+        error.ReversedRange => {},
+        error.IndexZero => {},
+        error.IndexOutOfBounds => {},
+        error.MalformedCommand => {},
+        error.EmptyBuffer => {},
+        error.NoOutputSpecified => {},
+        error.InvalidNumber => {},
+        else => err,
+    };
+}
+
+test "fuzz" {
+    const input = std.testing.fuzzInput(.{});
+    const alloc = std.testing.allocator;
+    const parsed = parse(alloc, input) catch |err| return handle(err);
+    _ = parsed;
+}

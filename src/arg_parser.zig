@@ -61,3 +61,7 @@ fn printUsage() !void {
         \\
     );
 }
+
+test {
+    _ = &std.testing.refAllDecls(@This());
+}

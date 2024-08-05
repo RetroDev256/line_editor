@@ -1,3 +1,5 @@
+const std = @import("std");
+
 pub const Index = union(enum) {
     specific: usize, // 123...
     infinity, // $
@@ -40,3 +42,7 @@ pub const Index = union(enum) {
         };
     }
 };
+
+test {
+    _ = &std.testing.refAllDecls(@This());
+}

@@ -1,5 +1,6 @@
 const Self = @This();
 
+const std = @import("std");
 const BoundedRange = @import("BoundedRange.zig");
 const Index = @import("index.zig").Index;
 
@@ -22,4 +23,8 @@ pub fn clamp(self: Self, length: usize) !Self {
         .start = if (self.start) |start| try start.clamp(length) else null,
         .end = if (self.end) |end| try end.clamp(length) else null,
     };
+}
+
+test {
+    _ = &std.testing.refAllDecls(@This());
 }

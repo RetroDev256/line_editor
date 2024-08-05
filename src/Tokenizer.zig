@@ -129,3 +129,16 @@ fn next(self: *Self) Token {
     result.loc.end = self.index;
     return result;
 }
+
+// Testing
+
+test {
+    _ = &std.testing.refAllDecls(@This());
+}
+
+test "fuzz" {
+    const input = std.testing.fuzzInput(.{});
+    const alloc = std.testing.allocator;
+    const tokenized = try tokenize(alloc, input);
+    alloc.free(tokenized);
+}

@@ -42,3 +42,7 @@ fn runOnce(
     defer self.deinit();
     try self.run();
 }
+
+test {
+    _ = &std.testing.refAllDecls(@This());
+}
