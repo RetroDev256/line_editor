@@ -47,7 +47,9 @@ pub fn moveLine(self: *Self, source_index: Index, dest_index: Index) !void {
     const dest = try self.checkAppendIndex(dest_index);
     const source = try self.checkIndex(source_index);
     const removed_lined = self.lines.orderedRemove(source);
-    self.lines.insertAssumeCapacity(dest, removed_lined);
+    if (dest > source) {
+        self.lines.insertAssumeCapacity(dest - 1, removed_lined);
+    } else self.lines.insertAssumeCapacity(dest - 1, removed_lined);
 }
 
 pub fn moveRange(self: *Self, source_range: Range, dest_index: Index) !void {
@@ -65,7 +67,7 @@ pub fn moveRange(self: *Self, source_range: Range, dest_index: Index) !void {
         self.lines.replaceRangeAssumeCapacity(source.start, line_count, &.{});
 
         if (after_buffer) {
-            const shifted = dest - line_count + 1;
+            const shifted = dest - line_count;
             try self.lines.insertSlice(self.alloc, shifted, moved_lines.items);
         } else try self.lines.insertSlice(self.alloc, dest, moved_lines.items);
     }
@@ -87,10 +89,21 @@ pub fn deleteRange(self: *Self, target_range: Range) !void {
 pub fn appendFile(self: *Self, file_name: []const u8) !void {
     const file = try std.fs.cwd().createFile(file_name, .{ .read = true, .truncate = false });
     defer file.close();
-    const max_bytes = std.math.maxInt(usize);
-    while (try file.reader().readUntilDelimiterOrEofAlloc(self.alloc, '\n', max_bytes)) |text| {
-        const owned = try self.alloc.dupe(u8, text);
-        try self.lines.append(self.alloc, owned);
+    var line = std.ArrayListUnmanaged(u8){};
+    defer line.deinit(self.alloc);
+    while (true) {
+        defer line.clearRetainingCapacity();
+        if (file.reader().streamUntilDelimiter(line.writer(self.alloc), '\n', null)) {
+            const owned = try self.alloc.dupe(u8, line.items);
+            try self.lines.append(self.alloc, owned);
+        } else |err| switch (err) {
+            error.EndOfStream => {
+                const owned_remainder = try self.alloc.dupe(u8, line.items);
+                try self.lines.append(self.alloc, owned_remainder);
+                break;
+            },
+            else => return err,
+        }
     }
 }
 

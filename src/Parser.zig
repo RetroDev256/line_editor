@@ -160,6 +160,7 @@ fn writeQuitCmd(self: *Self, token_data: []const u8) !Command {
 }
 
 fn moveCmd(self: *Self, token_data: []const u8) !Command {
+    std.debug.print("moveCmd: {any}\n", .{token_data});
     const dest = try parseIndex(token_data);
     return switch (try self.lineTarget()) {
         .none => .{ .move = dest },

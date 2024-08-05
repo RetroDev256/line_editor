@@ -70,7 +70,9 @@ fn next(self: *Self) Token {
         const c = self.buffer[self.index];
         switch (state) {
             .start => switch (c) {
-                ' ', '\t', '\r', '\n' => {}, // skip whitespace
+                ' ', '\t', '\r', '\n' => { // skip whitespace
+                    result.loc.start += 1;
+                },
                 ',', '$', 'd', 'p', 'q', 'h' => {
                     switch (c) {
                         ',' => result.tag = .range_seperator,
@@ -96,7 +98,7 @@ fn next(self: *Self) Token {
                 'm' => {
                     result.tag = .move_cmd;
                     result.loc.start += 1; // location IS the number
-                    state = .number;
+                    state = .eof_string; // not number, we want $
                 },
                 'w' => {
                     result.tag = .write_cmd;
@@ -110,7 +112,6 @@ fn next(self: *Self) Token {
                 else => state = .eof_string,
             },
             .number => switch (c) {
-                ' ', '\t', '\r', '\n' => {}, // skip whitespace
                 '0'...'9' => {},
                 else => break,
             },

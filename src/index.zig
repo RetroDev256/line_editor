@@ -29,18 +29,6 @@ pub const Index = union(enum) {
             .infinity => .infinity,
         };
     }
-
-    // used for converting between 0 indexed and 1 indexed array indexing
-    pub fn decrement(self: Index) !Index {
-        return switch (self) {
-            .specific => |line| blk: {
-                if (line == 0) {
-                    return error.IndexOutOfBounds;
-                } else break :blk .{ .specific = line - 1 };
-            },
-            .infinity => .infinity,
-        };
-    }
 };
 
 test {

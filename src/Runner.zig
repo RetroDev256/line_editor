@@ -30,7 +30,7 @@ pub fn init(
         .alloc = alloc,
         .cmd_in = cmd_in,
         .cmd_out = cmd_out,
-        .file_out = file_out,
+        .file_out = file_out orelse file_in,
         .buffer = LineBuffer.init(alloc),
     };
     if (file_in) |file_name| {
@@ -52,22 +52,23 @@ pub fn run(self: *Self) !void {
             .insert => try self.printLineNumber(self.line),
         }
         const source_maybe = try reader.readUntilDelimiterOrEofAlloc(self.alloc, '\n', cmd_max);
-        const source = if (source_maybe) |source| source else break;
-        defer self.alloc.free(source);
-
-        const trimmed_source = std.mem.trim(u8, source, "\n\r");
-
-        switch (self.mode) {
-            .command => self.runCommand(trimmed_source) catch |err| try self.handle(err),
-            // gosh, insert mode is so much easier to parse
-            .insert => if (std.mem.eql(u8, ".", trimmed_source)) {
-                self.mode = .command;
-            } else {
-                self.buffer.insertLine(self.line, trimmed_source) catch |err| {
-                    try self.handle(err);
-                };
-                self.line = self.line.add(1);
-            },
+        if (source_maybe) |source| {
+            defer self.alloc.free(source);
+            const trimmed_source = std.mem.trim(u8, source, "\n\r");
+            switch (self.mode) {
+                .command => self.runCommand(trimmed_source) catch |err| try self.handle(err),
+                // gosh, insert mode is so much easier to parse
+                .insert => if (std.mem.eql(u8, ".", trimmed_source)) {
+                    self.mode = .command;
+                } else {
+                    self.buffer.insertLine(self.line, trimmed_source) catch |err| {
+                        try self.handle(err);
+                    };
+                    self.line = self.line.add(1);
+                },
+            }
+        } else {
+            self.should_exit = true;
         }
     }
 }
@@ -169,7 +170,7 @@ fn runCommand(self: *Self, source: []const u8) !void {
             try self.buffer.insertLine(self.line, data);
         },
         .insert_text_line => |data| {
-            try self.buffer.insertLine(self.line, data.text);
+            try self.buffer.insertLine(data.dest, data.text);
         },
         .sub => |data| try self.runSub(data),
         .sub_line => |data| try self.runSubLine(data),
