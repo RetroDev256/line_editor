@@ -3,10 +3,10 @@ pub const Number = union(enum) {
     specific: usize, // 123...
     infinity, // $
 
-    pub fn toIndex(self: Number, length: usize) ?usize {
+    pub fn toIndex(self: Number, last_index: usize) usize {
         return switch (self) {
             .specific => |line_number| line_number,
-            .infinity => if (length == 0) return null else length - 1,
+            .infinity => last_index,
         };
     }
 
@@ -18,13 +18,6 @@ pub const Number = union(enum) {
                     return error.NumberUnderflow;
                 } else break :blk .{ .specific = line_number - 1 };
             },
-            .infinity => .infinity,
-        };
-    }
-    // used for converting between exclusive and inclusive ranges
-    pub fn inc(self: Number) Number {
-        return switch (self) {
-            .specific => |line_number| .{ .specific = line_number + 1 },
             .infinity => .infinity,
         };
     }
@@ -57,18 +50,11 @@ pub const Range = struct {
     start: ?Number,
     end: ?Number,
 
-    pub fn toBounded(self: Range, length: usize) BoundedRange {
-        if (length == 0) {
-            return BoundedRange.complete(0);
-        } else {
-            const complete = BoundedRange.complete(length);
-            // unwrapping the optionals is guarunteed safe
-            // because we checked that the length was not 0
-            return .{
-                .start = if (self.start) |s| s.toIndex(length).? else complete.start,
-                // convert to noninclusive range
-                .end = if (self.end) |e| e.toIndex(length).? + 1 else complete.end,
-            };
-        }
+    pub fn toBounded(self: Range, last_index: usize) BoundedRange {
+        const complete = BoundedRange.complete(last_index + 1);
+        return .{
+            .start = if (self.start) |s| s.toIndex(last_index) else complete.start,
+            .end = if (self.end) |s| s.toIndex(last_index) + 1 else complete.end,
+        };
     }
 };

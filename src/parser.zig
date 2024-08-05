@@ -19,6 +19,10 @@ pub const Write = struct {
     range: ?Range,
     file_out: ?[]const u8,
 };
+pub const Move = struct {
+    range: ?Range,
+    line: Number,
+};
 
 pub const Command = union(enum) {
     none,
@@ -31,6 +35,7 @@ pub const Command = union(enum) {
     write_quit: Write,
     insert: Insert,
     substitution: Substitution,
+    move: Move,
     line: Number,
 };
 
@@ -132,7 +137,7 @@ fn parseWriteorWriteQuitCmd(toker: *Tokenizer) !?Command {
 fn parseInsertCmd(toker: *Tokenizer) !?Command {
     var toker_copy = toker.*;
     const line = try parseIndex(&toker_copy);
-    if (toker_copy.eatMany(.{ .insert, .none })) |insert_tokens| {
+    if (toker_copy.eatMany(.{ .insert_cmd, .none })) |insert_tokens| {
         const insert = insert_tokens[0];
         const text = toker_copy.buffer[insert.loc.start..insert.loc.end];
         if (text.len > 0) {
@@ -164,6 +169,18 @@ fn parseSubstitutionCmd(toker: *Tokenizer) !?Command {
     }
     return null;
 }
+// RANGE? MOVE INDEX
+fn parseMoveCmd(toker: *Tokenizer) !?Command {
+    var toker_copy = toker.*;
+    const range = try parseRange(&toker_copy);
+    if (toker_copy.eat(.move_cmd)) |_| {
+        if (try parseIndex(&toker_copy)) |index| {
+            toker.* = toker_copy;
+            return Command{ .move = .{ .range = range, .line = index } };
+        }
+    }
+    return null;
+}
 // NUM EOF
 fn parseLineCmd(toker: *Tokenizer) !?Command {
     var toker_copy = toker.*;
@@ -189,6 +206,7 @@ pub fn parse(source: []const u8) !Command {
     if (try parseWriteorWriteQuitCmd(&toker)) |command| return command;
     if (try parseInsertCmd(&toker)) |command| return command;
     if (try parseSubstitutionCmd(&toker)) |command| return command;
+    if (try parseMoveCmd(&toker)) |command| return command;
     if (try parseLineCmd(&toker)) |command| return command;
     if (parseBlank(&toker)) |command| return command;
     return .none;

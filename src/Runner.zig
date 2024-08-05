@@ -88,9 +88,10 @@ fn switchCommands(self: *Runner, command: parser.Command) !bool {
         .none => return error.CommandNotRecognized,
         .delete => |delete| try self.runDelete(delete),
         .insert => |insert| try self.runInsert(insert),
-        .line => |line| self.runLine(line),
+        .line => |line| try self.runLine(line),
         .print => |print| try self.runPrint(print),
         .substitution => |substitution| try self.runSubstitution(substitution),
+        .move => |move| try self.runMove(move),
         .write => |write| try self.runWrite(write),
         .write_quit => |write_quit| {
             try self.runWrite(write_quit);
@@ -138,52 +139,30 @@ fn handleError(self: *const Runner, err: anyerror) !void {
 
 fn runHelp(self: *Runner) !void {
     try self.printToCmdOut(
-        \\Welcome to the simple line editor.
-        \\    You are currently on line {}, out of {} lines total.
-        \\
-        \\  Internal Memory:
-        \\MODE                     COMMAND or EDIT (swap using .)
-        \\LINE                     the current line number
-        \\FILE                     the current output file name
-        \\
-        \\  Basic Types:
-        \\NUMBER                   any sequence of base-10 digits
-        \\STRING                   any sequence of bytes (delimited by /)
-        \\INDEX:
-        \\    NUMBER               line NUMBER
-        \\    $                    the last line
-        \\RANGE:
-        \\    INDEX                the range spanning [INDEX, INDEX]
-        \\    INDEX,               the range spanning [INDEX, the last line]
-        \\    ,INDEX               the range spanning [0, INDEX]
-        \\    A,B                  the range spanning [A (INDEX), B (INDEX)]
-        \\
-        \\Commands (for EDIT MODE):
-        \\    .                    MODE <- COMMAND
-        \\    [STRING]             inserts STRING at LINE, LINE <- LINE + 1
-        \\
-        \\Commands (for COMMAND MODE):
-        \\    d                    deletes 1 line at LINE
-        \\    [RANGE]d             deletes all lines in RANGE
-        \\    .                    MODE <- EDIT
-        \\    [INDEX].             LINE <- INDEX, MODE <- EDIT
-        \\    .[STRING]            inserts STRING at LINE
-        \\    [INDEX].[STRING]     LINE <- INDEX, inserts STRING at LINE
-        \\    [INDEX]              LINE <- INDEX
-        \\    p                    prints 16 lines at LINE
-        \\    [RANGE]p             prints all lines in RANGE
-        \\    s/[OLD]/[NEW]        replaces all OLD (STRING) for NEW on LINE
-        \\    [RANGE]s/[OLD]/[NEW] replaces all OLD (STRING) for NEW in RANGE
-        \\    w                    saves all lines to FILE
-        \\    [RANGE]w             saves all lines in RANGE to FILE
-        \\    w [NAME]             FILE <- NAME, saves all lines to FILE
-        \\    [RANGE]w [NAME]      FILE <- NAME, saves all lines in RANGE to FILE
-        \\    wq                   saves all lines to FILE, exits
-        \\    [RANGE]wq            saves all lines in RANGE to FILE, exits
-        \\    wq [NAME]            FILE <- NAME, saves all lines to FILE, exits
-        \\    [RANGE]wq [NAME]     FILE <- NAME, saves all lines in RANGE to FILE, exits
-        \\    q                    exits
-        \\    h                    displays this text
+        \\You are on line {} of {}.
+        \\- - - Meanings - - -
+        \\  MODE                  COMMAND or EDIT (swap using .)
+        \\  LINE                  the current line number
+        \\  FILE                  the current output file name
+        \\  INDEX                 can be line number, $ (last line)
+        \\  RANGE:                (can be either of the following formats -)
+        \\  [X]                   line number X (INDEX)
+        \\  [A?],[B?]             lines [INDEX A (orelse 0), INDEX B (orelse $)]
+        \\- - - EDIT Mode - - -
+        \\  .                     MODE <- COMMAND
+        \\  [STRING]              inserts STRING at LINE, LINE <- LINE + 1
+        \\- - - COMMAND Mode - - -
+        \\  [INDEX]               LINE <- INDEX
+        \\  [RANGE]p              LINE <- RANGE.END, prints RANGE
+        \\  [INDEX].              LINE <- INDEX, MODE <- EDIT
+        \\  [INDEX].[NEW]         LINE <- INDEX, inserts NEW at LINE
+        \\  [RANGE]d              LINE <- RANGE.START, deletes RANGE
+        \\  [RANGE]s/[OLD]/[NEW]  LINE <- RANGE.START, OLD -> NEW in RANGE
+        \\  [RANGE]m[INDEX]       LINE <- INDEX, moves RANGE to INDEX
+        \\  [RANGE]w [NAME?]      FILE <- NAME (else FILE), saves RANGE to FILE
+        \\  [RANGE]wq [NAME?]     same as w varient, but also quits the program
+        \\  q                     exits
+        \\  h                     displays this text
         \\
     ,
         .{ self.line + 1, self.buffer.length() },
@@ -191,7 +170,11 @@ fn runHelp(self: *Runner) !void {
 }
 
 fn runInsert(self: *Runner, insert: parser.Insert) !void {
-    if (insert.line) |line| self.runLine(line);
+    if (insert.line) |line| {
+        // allow the user to insert at the end of the file
+        const last_index = self.buffer.length();
+        self.line = line.toIndex(last_index);
+    }
     if (insert.text) |line_text| {
         try self.buffer.insertLine(self.line, line_text);
         self.line += 1;
@@ -200,16 +183,15 @@ fn runInsert(self: *Runner, insert: parser.Insert) !void {
     }
 }
 
-fn runLine(self: *Runner, line: Number) void {
-    // the one exception - if there are no lines, we don't need to
-    // be within the range of all the lines. We can be at line 0.
-    self.line = line.toIndex(self.buffer.length()) orelse 0;
+fn runLine(self: *Runner, line: Number) !void {
+    const last_index = self.buffer.lastIndex() orelse return error.IndexOutOfBounds;
+    self.line = line.toIndex(last_index);
 }
 
 fn runDelete(self: *Runner, range: ?Range) !void {
     // no range? only one line.
     const default = BoundedRange.fromIndex(self.line, 1);
-    const bounds = self.resolveRange(default, range);
+    const bounds = try self.resolveRange(default, range);
     self.line = bounds.start;
     try self.buffer.deleteLines(bounds);
 }
@@ -217,7 +199,7 @@ fn runDelete(self: *Runner, range: ?Range) !void {
 fn runPrint(self: *Runner, range: ?Range) !void {
     // by default print 16 lines (if we can), completely arbitrary
     const default = BoundedRange.fromIndex(self.line, 16);
-    const bounds = self.resolveRange(default, range);
+    const bounds = try self.resolveRange(default, range);
     const lines = try self.buffer.getLines(bounds);
     self.line = bounds.start + lines.len;
     for (lines, 0..) |line, offset| {
@@ -230,7 +212,7 @@ fn runPrint(self: *Runner, range: ?Range) !void {
 fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
     // if no range was specified, replace only on the current line
     const default = BoundedRange.fromIndex(self.line, 1);
-    const bounds = self.resolveRange(default, substitution.range);
+    const bounds = try self.resolveRange(default, substitution.range);
     self.line = bounds.start;
     const lines = try self.buffer.getLines(bounds);
     for (0..lines.len) |line_offset| {
@@ -238,7 +220,7 @@ fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
         const line = self.buffer.lines.items[line_number];
 
         var new_line = std.ArrayListUnmanaged(u8){};
-        defer new_line.clearAndFree(self.alloc);
+        defer new_line.deinit(self.alloc);
         var dirty: bool = false;
 
         var idx: usize = 0;
@@ -260,6 +242,16 @@ fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
     }
 }
 
+fn runMove(self: *Runner, move: parser.Move) !void {
+    if (self.buffer.lastIndex()) |last_index| {
+        const default = BoundedRange.fromIndex(self.line, 1);
+        const bounds = try self.resolveRange(default, move.range);
+        self.line = bounds.start;
+        const line_number = move.line.toIndex(last_index);
+        try self.buffer.moveLines(bounds, line_number);
+    } else return error.IndexOutOfBounds;
+}
+
 fn runWrite(self: *Runner, write: parser.Write) !void {
     if (write.file_out) |new_out| self.file_out = new_out;
     if (self.file_out) |file_name| {
@@ -267,13 +259,15 @@ fn runWrite(self: *Runner, write: parser.Write) !void {
         // saving the entire file, not just one line if we don't
         // specify a line.
         const default = BoundedRange.complete(self.buffer.length());
-        const range = self.resolveRange(default, write.range);
+        const range = try self.resolveRange(default, write.range);
         try self.buffer.save(file_name, range);
     } else return error.NoOutputSpecified;
 }
 
-fn resolveRange(self: *const Runner, default: BoundedRange, range: ?Range) BoundedRange {
-    if (range) |resolved| {
-        return resolved.toBounded(self.buffer.length());
-    } else return default.clamp(self.buffer.length());
+fn resolveRange(self: *const Runner, default: BoundedRange, range: ?Range) !BoundedRange {
+    if (self.buffer.lastIndex()) |last_index| {
+        if (range) |resolved| {
+            return resolved.toBounded(last_index);
+        } else return default.clamp(self.buffer.length());
+    } else return error.RangeOutOfBounds;
 }

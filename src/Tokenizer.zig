@@ -21,7 +21,9 @@ pub const Token = struct {
         substitute_cmd, // s
         help_cmd, // h
 
-        insert, // starts with .
+        insert_cmd, // starts with .
+        move_cmd, // m
+
         sub_arg, // starts with / and delimited by /
 
         number, // 123456...
@@ -103,6 +105,11 @@ pub fn next(self: *Tokenizer) Token {
                     self.index += 1; // skip past for next token
                     break;
                 },
+                'm' => {
+                    result.tag = .move_cmd;
+                    self.index += 1; // skip past for next token
+                    break;
+                },
                 '0'...'9' => {
                     result.tag = .number;
                     state = .number;
@@ -133,7 +140,7 @@ pub fn next(self: *Tokenizer) Token {
                     result.loc.start += 1; // we don't want it to be in the range
                 },
                 '.' => {
-                    result.tag = .insert;
+                    result.tag = .insert_cmd;
                     state = .other_string; // anything after gets consumed
                     result.loc.start += 1; // we don't want it to be in the range
                 },
