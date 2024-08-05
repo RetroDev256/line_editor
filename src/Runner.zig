@@ -54,9 +54,11 @@ pub fn run(self: *Runner) !void {
         const source = if (source_maybe) |source| source else break;
         defer self.alloc.free(source);
 
+        const trimmed_source = std.mem.trim(u8, source, " \n\t\r");
+
         switch (self.mode) {
             .command => {
-                const command = parser.parse(source) catch |err| blk: {
+                const command = parser.parse(trimmed_source) catch |err| blk: {
                     try self.handleError(err);
                     break :blk .blank; // if there is an error in parsing, no command by default
                 };
@@ -67,10 +69,10 @@ pub fn run(self: *Runner) !void {
                 if (should_exit) return;
             },
             // gosh, edit mode is so much easier to parse
-            .edit => if (std.mem.eql(u8, ".", source)) {
+            .edit => if (std.mem.eql(u8, ".", trimmed_source)) {
                 self.mode = .command;
             } else {
-                try self.buffer.insertLine(self.alloc, self.line, source);
+                try self.buffer.insertLine(self.alloc, self.line, trimmed_source);
                 self.line += 1;
             },
         }
