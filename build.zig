@@ -41,6 +41,7 @@ fn buildAll(b: *std.Build) void {
 fn buildNative(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
     // exe step
     const exe = b.addExecutable(.{
         .name = "line_editor",

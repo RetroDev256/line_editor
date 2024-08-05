@@ -30,14 +30,14 @@ pub fn parseCmdLine(args: []const []const u8) !?Options {
                 options.file_in = args[arg];
             },
             .file_out => {
-                if (options.file_in) |_| {
+                if (options.file_out) |_| {
                     try printUsage();
                     return null;
                 }
                 options.file_out = args[arg];
             },
             .script_in => {
-                if (options.file_in) |_| {
+                if (options.script_in) |_| {
                     try printUsage();
                     return null;
                 }
