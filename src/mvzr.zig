@@ -1545,6 +1545,13 @@ fn compileRegex(RegexT: type, in: []const u8) ?RegexT {
         return null;
     }
     if (bad_string) {
+        const tail = switch (i) {
+            0 => "st",
+            1 => "nd",
+            2 => "rd",
+            else => "th",
+        };
+        _ = tail; // autofix
         return null;
     }
     return out;
