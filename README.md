@@ -13,8 +13,7 @@ FILE                     the current output file name
 
   Basic Types:
 NUMBER                   any sequence of base-10 digits
-STRING                   any sequence of bytes
-REGEX                    / deliminated regular expression
+STRING                   any sequence of bytes (delimited by /)
 INDEX:
     NUMBER               line NUMBER
     $                    the last line
@@ -38,8 +37,8 @@ Commands (for COMMAND MODE):
     [INDEX]              LINE <- INDEX
     p                    prints 16 lines at LINE
     [RANGE]p             prints all lines in RANGE
-    s/[OLD]/[NEW]        replaces all OLD (REGEX) for NEW on LINE
-    [RANGE]s/[OLD]/[NEW] replaces all OLD (REGEX) for NEW in RANGE
+    s/[OLD]/[NEW]        replaces all OLD (STRING) for NEW on LINE
+    [RANGE]s/[OLD]/[NEW] replaces all OLD (STRING) for NEW in RANGE
     w                    saves all lines to FILE
     [RANGE]w             saves all lines in RANGE to FILE
     w [NAME]             FILE <- NAME, saves all lines to FILE

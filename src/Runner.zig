@@ -2,10 +2,6 @@ const std = @import("std");
 const File = std.fs.File;
 const Allocator = std.mem.Allocator;
 
-// bundling this with the program instead of using the package manager
-// because it was using std.log.err, really annoying
-const mvzr = @import("mvzr.zig");
-
 const parser = @import("parser.zig");
 const LineBuffer = @import("LineBuffer.zig");
 
@@ -129,8 +125,6 @@ fn handleError(self: *const Runner, err: anyerror) !void {
         error.RangeEndIsZero => "range end index cannot be zero",
         // from the write or write & save commands
         error.NoOutputSpecified => "no output filename specified",
-        // from the substitution command
-        error.InvalidRegex => "failed to compile regex",
         // from LineBuffer
         error.InvalidRange => "range has negative length",
         error.RangeOutOfBounds => "range falls outside of file",
@@ -154,8 +148,7 @@ fn runHelp(self: *Runner) !void {
         \\
         \\  Basic Types:
         \\NUMBER                   any sequence of base-10 digits
-        \\STRING                   any sequence of bytes
-        \\REGEX                    / deliminated regular expression
+        \\STRING                   any sequence of bytes (delimited by /)
         \\INDEX:
         \\    NUMBER               line NUMBER
         \\    $                    the last line
@@ -179,8 +172,8 @@ fn runHelp(self: *Runner) !void {
         \\    [INDEX]              LINE <- INDEX
         \\    p                    prints 16 lines at LINE
         \\    [RANGE]p             prints all lines in RANGE
-        \\    s/[OLD]/[NEW]        replaces all OLD (REGEX) for NEW on LINE
-        \\    [RANGE]s/[OLD]/[NEW] replaces all OLD (REGEX) for NEW in RANGE
+        \\    s/[OLD]/[NEW]        replaces all OLD (STRING) for NEW on LINE
+        \\    [RANGE]s/[OLD]/[NEW] replaces all OLD (STRING) for NEW in RANGE
         \\    w                    saves all lines to FILE
         \\    [RANGE]w             saves all lines in RANGE to FILE
         \\    w [NAME]             FILE <- NAME, saves all lines to FILE
@@ -191,7 +184,7 @@ fn runHelp(self: *Runner) !void {
         \\    [RANGE]wq [NAME]     FILE <- NAME, saves all lines in RANGE to FILE, exits
         \\    q                    exits
         \\    h                    displays this text
-        \\
+        \\    
     ,
         .{ self.line + 1, self.buffer.length() },
     );
@@ -235,7 +228,6 @@ fn runPrint(self: *Runner, range: ?Range) !void {
 }
 
 fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
-    const regex = mvzr.compile(substitution.pattern) orelse return error.InvalidRegex;
     // if no range was specified, replace only on the current line
     const default = BoundedRange.fromIndex(self.line, 1);
     const bounds = self.resolveRange(default, substitution.range);
@@ -243,16 +235,27 @@ fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
     const lines = try self.buffer.getLines(bounds);
     for (0..lines.len) |line_offset| {
         const line_number = bounds.start + line_offset;
-        while (true) {
-            const line = self.buffer.lines.items[line_number];
-            if (regex.match(line)) |match| {
-                const changed = try std.fmt.allocPrint(self.alloc, "{s}{s}{s}", .{
-                    line[0..match.start], substitution.replacement, line[match.end..],
-                });
-                defer self.alloc.free(changed);
-                try self.buffer.deleteLines(BoundedRange.fromIndex(line_number, 1));
-                try self.buffer.insertLine(line_number, changed);
-            } else break;
+        const line = self.buffer.lines.items[line_number];
+
+        var new_line = std.ArrayListUnmanaged(u8){};
+        defer new_line.clearAndFree(self.alloc);
+        var dirty: bool = false;
+
+        var idx: usize = 0;
+        while (idx < line.len) {
+            if (std.mem.startsWith(u8, line[idx..], substitution.pattern)) {
+                dirty = true;
+                try new_line.appendSlice(self.alloc, substitution.replacement);
+                idx += substitution.pattern.len;
+            } else {
+                try new_line.append(self.alloc, line[idx]);
+                idx += 1;
+            }
+        }
+
+        if (dirty) {
+            try self.buffer.deleteLines(BoundedRange.fromIndex(line_number, 1));
+            try self.buffer.insertLine(line_number, new_line.items);
         }
     }
 }

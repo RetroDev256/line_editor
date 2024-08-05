@@ -37,8 +37,8 @@ pub const BoundedRange = struct {
     pub fn complete(length: usize) @This() {
         return .{ .start = 0, .end = length };
     }
-    pub fn fromIndex(index: usize, distance: usize) @This() {
-        return .{ .start = index, .end = index + distance };
+    pub fn fromIndex(index: usize, count: usize) @This() {
+        return .{ .start = index, .end = index + count };
     }
     pub fn clamp(self: @This(), length: usize) @This() {
         return .{
