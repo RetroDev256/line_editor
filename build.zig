@@ -75,20 +75,12 @@ fn buildNative(b: *std.Build) void {
 }
 
 const target_strs: []const []const u8 = &.{
-    "aarch64_be-linux-gnu",    "aarch64_be-linux-musl", "aarch64-linux-gnu",
-    "aarch64-linux-musl",      "aarch64-windows-gnu",   "aarch64-macos-none",
-    "armeb-linux-gnueabi",     "armeb-linux-gnueabihf", "armeb-linux-musleabi",
-    "armeb-linux-musleabihf",  "arm-linux-gnueabi",     "arm-linux-gnueabihf",
-    "arm-linux-musleabi",      "arm-linux-musleabihf",  "x86-linux-gnu",
-    "x86-linux-musl",          "x86-windows-gnu",       "mips64el-linux-musl",
-    "mips64-linux-gnuabi64",   "mips64-linux-musl",     "mipsel-linux-gnueabi",
-    "mipsel-linux-gnueabihf",  "mipsel-linux-musl",     "mips-linux-gnueabi",
-    "mips-linux-gnueabihf",    "mips-linux-musl",       "powerpc64le-linux-gnu",
-    "powerpc64le-linux-musl",  "powerpc64-linux-musl",  "powerpc-linux-gnueabi",
-    "powerpc-linux-gnueabihf", "powerpc-linux-musl",    "riscv32-linux-gnuilp32",
-    "riscv32-linux-musl",      "riscv64-linux-gnu",     "riscv64-linux-musl",
-    "sparc64-linux-gnu",       "wasm32-wasi-musl",      "x86_64-linux-gnu",
-    "x86_64-linux-musl",       "x86_64-windows-gnu",    "x86_64-macos-none",
+    "aarch64_be-linux",  "aarch64-linux",   "aarch64-windows", "aarch64-macos",
+    "armeb-linux",       "arm-linux",       "x86-linux",       "x86-windows",
+    "mips64el-linux",    "mips64-linux",    "mipsel-linux",    "mips-linux",
+    "powerpc64le-linux", "powerpc64-linux", "powerpc-linux",   "riscv32-linux",
+    "riscv64-linux",     "sparc64-linux",   "wasm32-wasi",     "x86_64-linux",
+    "x86_64-windows",    "x86_64-macos",
 };
 
 fn optimizeMore(artifact: *std.Build.Step.Compile) void {

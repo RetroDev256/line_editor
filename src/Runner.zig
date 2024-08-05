@@ -184,7 +184,7 @@ fn runHelp(self: *Runner) !void {
         \\    [RANGE]wq [NAME]     FILE <- NAME, saves all lines in RANGE to FILE, exits
         \\    q                    exits
         \\    h                    displays this text
-        \\    
+        \\
     ,
         .{ self.line + 1, self.buffer.length() },
     );
