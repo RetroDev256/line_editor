@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const XXX = false;
 const one: u64 = 1;
 pub const MAX_REGEX_OPS = 64;
+
 pub const MAX_CHAR_SETS = 8;
 const RegexType = enum(u5) {
     unused,
@@ -109,11 +110,13 @@ pub fn SizedRegex(ops: comptime_int, char_sets: comptime_int) type {
                 return false;
             }
         }
+
         pub fn toOwnedRegex(regex: *const SizedRegexT, allocator: std.mem.Allocator) !*const SizedRegexT {
             const heap_regex = try allocator.create(SizedRegexT);
             heap_regex.* = regex.*;
             return heap_regex;
         }
+
         pub fn iterator(regex: *const SizedRegexT, haystack: []const u8) RegexIterator {
             return RegexIterator{
                 .regex = regex,
@@ -173,10 +176,12 @@ pub fn SizedRegex(ops: comptime_int, char_sets: comptime_int) type {
         }
     };
 }
+
 pub const Match = struct {
     slice: []const u8,
     start: usize,
     end: usize,
+
     pub fn toOwnedMatch(matched: Match, allocator: std.mem.Allocator) !Match {
         const new_slice = try allocator.dupe(u8, matched.slice);
         return Match{
@@ -211,6 +216,7 @@ pub fn match(haystack: []const u8, pattern: []const u8) ?Match {
         return null;
     }
 }
+
 fn matchOuterPattern(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i: usize) ?OpMatch {
     if (findAlt(patt, 0)) |_| {
         var remaining_patt = patt;
@@ -345,6 +351,7 @@ fn matchStar(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i
     while (matchPattern(this_patt, sets, haystack, i)) |m| {
         i = m.i;
         assert(!(i > haystack.len));
+
         if (i == haystack.len or i == i_in) break;
     }
     const next_patt = nextPattern(patt);
@@ -362,6 +369,7 @@ fn matchStar(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i
     if (maybe_next) |m2| {
         return m2;
     }
+
     i = if (i == i_in) i_in else (i - 1);
     while (true) {
         const try_next = matchPattern(next_patt, sets, haystack, i);
@@ -373,14 +381,17 @@ fn matchStar(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i
         if (i == i_in) break;
         i -= 1;
     }
+    return OpMatch{ .i = i_in, .j = nextPattern(next_patt) };
 }
 fn matchPlus(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i: usize) ?OpMatch {
     const this_patt = thisPattern(patt);
     const first_m = matchPattern(this_patt, sets, haystack, i);
     if (first_m == null) return null;
     const m1 = first_m.?;
+
     if (m1.i == haystack.len) return OpMatch{ .i = m1.i, .j = nextPattern(patt) };
     const m2 = matchStar(patt, sets, haystack, m1.i);
+
     if (m2.i == m1.i) {
         return OpMatch{ .i = m1.i, .j = nextPattern(patt) };
     } else {
@@ -422,6 +433,7 @@ fn matchEagerOptional(patt: []const RegOp, sets: []const CharSet, haystack: []co
 fn matchLazyStar(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i_in: usize) OpMatch {
     const this_patt = thisPattern(patt);
     const next_patt = nextPattern(patt);
+
     var match_first = if (next_patt.len != 0)
         matchPattern(next_patt, sets, haystack, i_in)
     else
@@ -430,13 +442,16 @@ fn matchLazyStar(patt: []const RegOp, sets: []const CharSet, haystack: []const u
         return m;
     }
     var i: usize = i_in;
+
     match_first = matchPattern(this_patt, sets, haystack, i);
     if (match_first) |m| {
         i = m.i;
     }
+
     while (true) {
         if (i == haystack.len)
             return OpMatch{ .i = i, .j = next_patt };
+
         const match_theirs = matchPattern(next_patt, sets, haystack, i);
         if (match_theirs) |m1| {
             return m1;
@@ -457,6 +472,7 @@ fn matchLazyPlus(patt: []const RegOp, sets: []const CharSet, haystack: []const u
     const m1 = first_m.?;
     if (m1.i == haystack.len) return OpMatch{ .i = m1.i, .j = nextPattern(patt) };
     const m2 = matchLazyStar(patt, sets, haystack, m1.i);
+
     return m2;
 }
 fn matchLazyOptional(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i: usize) ?OpMatch {
@@ -522,6 +538,7 @@ fn matchUpToInner(
 ) ?OpMatch {
     if (count == 1) {
         const opt = matchOptional(patt, sets, haystack, i_in);
+
         return opt;
     }
     const this_patt = thisPattern(patt);
@@ -545,6 +562,7 @@ fn matchUpToInner(
         if (maybe_rest) |m3| {
             return m3;
         }
+
         if (maybe_next) |m2| {
             return m2;
         } else {
@@ -558,6 +576,7 @@ fn matchEagerUpTo(patt: []const RegOp, sets: []const CharSet, haystack: []const 
     const this_patt = thisPattern(patt[1..]);
     const first_match = matchPattern(this_patt, sets, haystack, i_in);
     if (first_match == null) return OpMatch{ .i = 0, .j = nextPattern(patt) };
+
     var latest_match: OpMatch = first_match.?;
     var count = patt[0].eager_up_to - 1;
     while (count > 0) : (count -= 1) {
@@ -572,10 +591,13 @@ fn matchEagerUpTo(patt: []const RegOp, sets: []const CharSet, haystack: []const 
 }
 fn matchGroup(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i: usize) ?OpMatch {
     const inner_patt = sliceGroup(patt);
+
     if (inner_patt.len == 0) {
         return OpMatch{ .i = i, .j = nextPattern(patt) };
     }
+
     const next_patt = nextPattern(patt);
+
     if (!hasAlt(patt)) {
         const maybe_match = matchPattern(inner_patt, sets, haystack, i);
         if (maybe_match) |m| {
@@ -584,6 +606,7 @@ fn matchGroup(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, 
             return null;
         }
     }
+
     if (next_patt.len == 0) {
         const our_match = matchAlt(inner_patt, sets, haystack, i);
         if (our_match) |m| {
@@ -623,6 +646,7 @@ fn matchWordBreak(patt: []const RegOp, sets: []const CharSet, haystack: []const 
         }
     }
     const was_word = isWordChar(haystack[i - 1]);
+
     if (!was_word and this_is_word) {
         return OpMatch{ .i = i, .j = nextPattern(patt) };
     } else if (was_word and !this_is_word) {
@@ -630,6 +654,7 @@ fn matchWordBreak(patt: []const RegOp, sets: []const CharSet, haystack: []const 
     } else {
         return null;
     }
+
     _ = sets;
 }
 fn matchNotWordBreak(patt: []const RegOp, sets: []const CharSet, haystack: []const u8, i: usize) ?OpMatch {
@@ -748,6 +773,7 @@ fn patternAfterGroup(patt: []const RegOp) []const RegOp {
 fn thisPattern(patt: []const RegOp) []const RegOp {
     switch (patt[0]) {
         .left => return thisGroup(patt),
+
         .some => return patt[0..nextPatternForSome(patt)],
         else => return patt[0..1],
     }
@@ -924,6 +950,7 @@ fn findRight(patt: []const RegOp, j_in: usize) usize {
     }
     unreachable;
 }
+
 pub fn resourcesNeeded(comptime in: []const u8) struct { comptime_int, comptime_int } {
     const maybe_out = compileRegex(SizedRegex(4096, 257), in);
     var max_s: usize = 0;
@@ -947,12 +974,14 @@ pub fn resourcesNeeded(comptime in: []const u8) struct { comptime_int, comptime_
 fn prefixModifier(patt: []RegOp, j: usize, op: RegOp) bool {
     if (j == 0 or patt[j] == .begin) return false;
     var find_j = j - 1;
+
     switch (patt[find_j]) {
         .right => {
             find_j = beforePriorLeft(patt, find_j);
         },
         else => {},
     }
+
     if (find_j > 0) {
         switch (patt[find_j - 1]) {
             .alt,
@@ -1067,10 +1096,12 @@ fn findSetIndex(sets: []const CharSet, set: CharSet, s: usize) u8 {
 pub fn compile(in: []const u8) ?Regex {
     return compileRegex(Regex, in);
 }
+
 fn compileRegex(RegexT: type, in: []const u8) ?RegexT {
     var out = RegexT{};
     var patt = &out.patt;
     const sets = &out.sets;
+
     var bad_string: bool = false;
     var i: usize = 0;
     var j: usize = 0;
@@ -1272,6 +1303,7 @@ fn compileRegex(RegexT: type, in: []const u8) ?RegexT {
                     break :dispatch;
                 } else {
                     i += 1;
+
                     switch (in[i]) {
                         'd' => {
                             patt[j] = RegOp{ .digit = {} };
@@ -1302,9 +1334,11 @@ fn compileRegex(RegexT: type, in: []const u8) ?RegexT {
                                 patt[j] = RegOp{ .not_word_break = {} };
                             }
                         },
+
                         'r', 'n', 't' => {
                             patt[j] = RegOp{ .char = valueFor(in[i..]).? };
                         },
+
                         'x' => {
                             i += 1;
                             const b = parseHex(in[i..]) catch {
@@ -1554,6 +1588,7 @@ fn parseCharSet(in: []const u8, patt: []RegOp, sets: []CharSet, j: usize, i_in: 
     } else unreachable;
     return .{ i, s };
 }
+const testing = std.testing;
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -1727,6 +1762,7 @@ test "match some things" {
     try testFail("a+", "b");
     try testMatchAll("a?", "a");
     try testMatchAll("^\\w*?abc", "qqqqabc");
+
     try testFail("^\\w*?abcd", "qqqqabc");
     try testMatchAll("^a*?abc", "abc");
     try testMatchAll("^1??abc", "abc");
@@ -1775,10 +1811,12 @@ test "match some things" {
     try testMatchAll("[A-Za-z]+$", "Pabcex");
     try testMatchAll("^[^\n]+$", "a single line");
     try testFail("^[^\n]+$", "several \n lines");
+
     try testFail("[]+", "abc");
     try testFail("[]", "a");
     try testMatchAll("abc()d", "abcd");
     try testMatchAll("abc(|||)d", "abcd");
+
     try testMatchAll("(a*?)*aa", "aaa");
     try testMatchAll("(){0,1}q$", "q");
     try testMatchAll("(){1,2}q$", "q");
@@ -1786,6 +1824,7 @@ test "match some things" {
     try testMatchAll("()+q$", "q");
     try testMatchAll("^(q*)*$", "qqqq");
     try testMatchEnd("[bc]*(cd)+", "cbcdcd");
+
     try testMatchAll("^[a-f0-9]{32}", "0800fc577294c34e0b28ad2839435945");
     try testMatchAll("ab+c|de+f", "abbbc");
     try testMatchAll("ab+c|de+f", "deeeef");
@@ -1797,25 +1836,31 @@ test "match some things" {
     try testMatchAll("employ(er|ee|ment|ing|able)", "employing");
     try testMatchAll("employ(|er|ee|ment|ing|able)", "employ");
     try testMatchAll("employ(|er|ee|ment|ing|able)$", "employee");
+
     try testMatchAll("\\$\\.\\(\\)\\*\\+\\?\\[\\\\]\\^\\{\\|\\}", "$.()*+?[\\]^{|}");
     try testMatchAll("[\\x41-\\x5a]+", "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+
     const test_escapes =
         \\\$\.\(\)\*\+\?\[\\]\^\{\|\}
     ;
     try testMatchAll(test_escapes, "$.()*+?[\\]^{|}");
+
     try testMatchAll("[^\\Wf]+", "YyIcMy9Z");
     try testFail("[^\\Wf]+$", "YyIcMy9Zf");
     try testMatchAll("[\\x48-\\x4c$]+", "HIJ$KL");
     try testMatchAll("[^^]+", "abXdea!@#$!%$#$%$&$");
     try testFail("^[^^]+", "^abXdea!@#$!%$#$%$&$");
+
     try testMatchAll("To the Bitter End$", "To the Bitter End\n");
     try testMatchAll(
         "William Gates Jr. Sucks.$",
         "William Gates Jr. Sucks.\r\n",
     );
+
     try testMatchAll("(fob)*boba$", "fobboba");
     try testFail("^(fob)*boba$", "fobfobfoboba");
     try testMatchSlice("(fob)*boba", "fobfobfoboba", "boba");
+
     try testMatchAll("\\bsnap\\b", "snap");
     try testMatchAll("\\bsnap\\b!", "snap!");
     try testMatchAll("\\b4\\b", "4");
@@ -1831,9 +1876,12 @@ test "match some things" {
     try testMatchAll("[0-9]{4}", "1951");
     try testMatchAll("(0[1-9]|1[012])[\\/](0[1-9]|[12][0-9]|3[01])[\\/][0-9]{4}", "10/12/1951");
     try testMatchAll("[\\x09]", "\t");
+
     try testMatchAll("^[a-zA-Z0-9_!#$%&.-]+@([a-zA-Z0-9.-])+$", "myname.myfirst_name@gmail.com");
     try testFail("(a+a+)+b", "a" ** 2048);
+
     try testFail("(a+?a+?)+?b", "a" ** 2048);
+
     try testFail("^(.*?,){254}P", "12345," ** 255);
 }
 test "workshop" {}

@@ -20,7 +20,7 @@ file_out: ?[]const u8,
 
 mode: enum { command, edit } = .command,
 line: usize = 0,
-buffer: LineBuffer = .{},
+buffer: LineBuffer,
 
 const Runner = @This();
 
@@ -31,15 +31,21 @@ pub fn runOnce(alloc: Allocator, cmd_in: File, cmd_out: ?File, file_in: ?[]const
 }
 
 pub fn init(alloc: Allocator, cmd_in: File, cmd_out: ?File, file_in: ?[]const u8, file_out: ?[]const u8) !Runner {
-    var self: Runner = .{ .alloc = alloc, .cmd_in = cmd_in, .cmd_out = cmd_out, .file_out = file_out };
+    var self: Runner = .{
+        .alloc = alloc,
+        .cmd_in = cmd_in,
+        .cmd_out = cmd_out,
+        .file_out = file_out,
+        .buffer = LineBuffer.init(alloc),
+    };
     if (file_in) |file_name| {
-        try self.buffer.appendFile(self.alloc, file_name);
+        try self.buffer.appendFile(file_name);
     }
     return self;
 }
 
 pub fn deinit(self: *Runner) void {
-    self.buffer.deinit(self.alloc);
+    self.buffer.deinit();
 }
 
 pub fn run(self: *Runner) !void {
@@ -72,7 +78,7 @@ pub fn run(self: *Runner) !void {
             .edit => if (std.mem.eql(u8, ".", trimmed_source)) {
                 self.mode = .command;
             } else {
-                try self.buffer.insertLine(self.alloc, self.line, trimmed_source);
+                try self.buffer.insertLine(self.line, trimmed_source);
                 self.line += 1;
             },
         }
@@ -194,7 +200,7 @@ fn runHelp(self: *Runner) !void {
 fn runInsert(self: *Runner, insert: parser.Insert) !void {
     if (insert.line) |line| self.runLine(line);
     if (insert.text) |line_text| {
-        try self.buffer.insertLine(self.alloc, self.line, line_text);
+        try self.buffer.insertLine(self.line, line_text);
         self.line += 1;
     } else {
         self.mode = .edit;
@@ -245,7 +251,7 @@ fn runSubstitution(self: *Runner, substitution: parser.Substitution) !void {
                 });
                 defer self.alloc.free(changed);
                 try self.buffer.deleteLines(BoundedRange.fromIndex(line_number, 1));
-                try self.buffer.insertLine(self.alloc, line_number, changed);
+                try self.buffer.insertLine(line_number, changed);
             } else break;
         }
     }
