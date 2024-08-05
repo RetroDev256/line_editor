@@ -89,153 +89,99 @@ fn substituteCmd(self: *Self, token_data: []const u8) !Command {
     };
     const before = token_data[1 .. split + 1];
     const after = token_data[split + 2 ..];
-    if (self.has_range_seperator) {
-        return Command{ .sub_range = .{
-            .before = before,
-            .after = after,
-            .dest = .{ .start = self.starting_index, .end = self.ending_index },
-        } };
-    } else {
-        if (self.ending_index != null) return error.MalformedCommand;
-        if (self.starting_index) |line| {
-            return Command{ .sub_line = .{ .before = before, .after = after, .dest = line } };
-        } else return Command{ .sub = .{ .before = before, .after = after } };
-    }
+    return switch (self.lineTarget()) {
+        .none => .{ .sub = .{ .before = before, .after = after } },
+        .index => |index| .{ .sub_line = .{ .before = before, .after = after, .dest = index } },
+        .range => |range| .{ .sub_range = .{ .before = before, .after = after, .dest = range } },
+    };
 }
 
 fn insertCmd(self: *Self, token_data: []const u8) !Command {
-    if (self.ending_index != null) return error.MalformedCommand;
-    if (self.has_range_seperator) return error.MalformedCommand;
     if (token_data.len == 0) {
-        if (self.starting_index) |index| {
-            return Command{ .insert_mode_line = index };
-        } else return .insert_mode;
+        return switch (self.lineTarget()) {
+            .none => .insert_mode,
+            .insert => |index| .{ .insert_mode_line = index },
+            .range => error.MalformedCommand,
+        };
     } else {
-        if (self.starting_index) |index| {
-            return Command{ .insert_text_line = .{
+        return switch (self.lineTarget()) {
+            .none => .{ .insert_text = token_data },
+            .insert => |index| .{ .insert_text_line = .{
                 .dest = index,
                 .text = token_data,
-            } };
-        }
-        return Command{ .insert_text = token_data };
+            } },
+            .range => error.MalformedCommand,
+        };
     }
 }
 
 fn writeCmd(self: *Self, token_data: []const u8) !Command {
     if (token_data.len == 0) {
-        if (self.has_range_seperator) {
-            return Command{ .write_default_range = .{
-                .start = self.starting_index,
-                .end = self.ending_index,
-            } };
-        } else {
-            if (self.ending_index != null) return error.MalformedCommand;
-            if (self.starting_index) |line| {
-                return Command{ .write_default_line = line };
-            } else return .write_default;
-        }
+        return switch (self.lineTarget()) {
+            .none => .write_default,
+            .index => |index| .{ .write_default_line = index },
+            .range => |range| .{ .write_default_range = range },
+        };
     } else {
-        if (self.has_range_seperator) {
-            return Command{ .write_range = .{
-                .source = .{
-                    .start = self.starting_index,
-                    .end = self.ending_index,
-                },
+        return switch (self.lineTarget()) {
+            .none => .write,
+            .index => |index| Command{ .write_line = .{
+                .source = index,
                 .file_out = token_data,
-            } };
-        } else {
-            if (self.ending_index != null) return error.MalformedCommand;
-            if (self.starting_index) |line| {
-                return Command{ .write_line = .{
-                    .source = line,
-                    .file_out = token_data,
-                } };
-            } else return Command{ .write = token_data };
-        }
+            } },
+            .range => |range| Command{ .write_range = .{
+                .source = range,
+                .file_out = token_data,
+            } },
+        };
     }
 }
 
 fn writeQuitCmd(self: *Self, token_data: []const u8) !Command {
     if (token_data.len == 0) {
-        if (self.has_range_seperator) {
-            return Command{ .write_quit_default_range = .{
-                .start = self.starting_index,
-                .end = self.ending_index,
-            } };
-        } else {
-            if (self.ending_index != null) return error.MalformedCommand;
-            if (self.starting_index) |line| {
-                return Command{ .write_quit_default_line = line };
-            } else return .write_quit_default;
-        }
+        return switch (self.lineTarget()) {
+            .none => .write_quit_default,
+            .index => |index| .{ .write_quit_default_line = index },
+            .range => |range| .{ .write_quit_default_range = range },
+        };
     } else {
-        if (self.has_range_seperator) {
-            return Command{ .write_quit_range = .{
-                .source = .{
-                    .start = self.starting_index,
-                    .end = self.ending_index,
-                },
+        return switch (self.lineTarget()) {
+            .none => .write_quit,
+            .index => |index| Command{ .write_quit_line = .{
+                .source = index,
                 .file_out = token_data,
-            } };
-        } else {
-            if (self.ending_index != null) return error.MalformedCommand;
-            if (self.starting_index) |line| {
-                return Command{ .write_quit_line = .{
-                    .source = line,
-                    .file_out = token_data,
-                } };
-            } else return Command{ .write_quit = token_data };
-        }
+            } },
+            .range => |range| Command{ .write_quit_range = .{
+                .source = range,
+                .file_out = token_data,
+            } },
+        };
     }
 }
 
 fn moveCmd(self: *Self, token_data: []const u8) !Command {
-    const destination = try parseIndex(token_data);
-    if (self.has_range_seperator) {
-        return Command{ .move_range = .{
-            .dest = destination,
-            .source = .{
-                .start = self.starting_index,
-                .end = self.ending_index,
-            },
-        } };
-    } else {
-        if (self.ending_index != null) return error.MalformedCommand;
-        if (self.starting_index) |line| {
-            return Command{ .move_line = .{
-                .source = line,
-                .dest = destination,
-            } };
-        } else return Command{ .move = destination };
-    }
+    const dest = try parseIndex(token_data);
+    return switch (self.lineTarget()) {
+        .none => .{ .move = dest },
+        .index => |index| .{ .move_line = .{ .source = index, .dest = dest } },
+        .range => |range| .{ .move_range = .{ .source = range, .dest = dest } },
+    };
 }
 
 fn printCmd(self: *Self) !Command {
-    if (self.has_range_seperator) {
-        return Command{ .print_range = .{
-            .start = self.starting_index,
-            .end = self.ending_index,
-        } };
-    } else {
-        if (self.ending_index != null) return error.MalformedCommand;
-        if (self.starting_index) |line| {
-            return Command{ .print_line = line };
-        } else return .print;
-    }
+    return switch (self.lineTarget()) {
+        .none => .print,
+        .index => |index| .{ .print_line = index },
+        .range => |range| .{ .print_range = range },
+    };
 }
 
 fn deleteCmd(self: *Self) !Command {
-    if (self.has_range_seperator) {
-        return Command{ .delete_range = .{
-            .start = self.starting_index,
-            .end = self.ending_index,
-        } };
-    } else {
-        if (self.ending_index != null) return error.MalformedCommand;
-        if (self.starting_index) |line| {
-            return Command{ .delete_line = line };
-        } else return .delete;
-    }
+    return switch (self.lineTarget()) {
+        .none => .delete,
+        .index => |index| .{ .delete_line = index },
+        .range => |range| .{ .delete_range = range },
+    };
 }
 
 fn quitCmd(self: *Self) !Command {
@@ -250,6 +196,25 @@ fn helpCmd(self: *Self) !Command {
     if (self.has_range_seperator) return error.MalformedCommand;
     if (self.ending_index != null) return error.MalformedCommand;
     return .help;
+}
+
+const LineTarget = union(enum) { none, index: Index, range: Range };
+
+fn lineTarget(self: *Self) LineTarget {
+    if (self.has_range_seperator) {
+        return .{ .range = .{
+            .start = self.starting_index,
+            .end = self.ending_index,
+        } };
+    } else {
+        if (self.ending_index != null) {
+            return error.MalformedCommand;
+        } else {
+            if (self.starting_index) |index| {
+                return .{ .index = index };
+            } else return .none;
+        }
+    }
 }
 
 fn updateRange(self: *Self, value: Index) !void {
@@ -310,7 +275,7 @@ fn parseCommand(self: *Self) !?Command {
     if (self.has_range_seperator) return error.MalformedCommand;
     if (self.ending_index != null) return error.MalformedCommand;
     if (self.starting_index) |index| {
-        return Command{ .line = index };
+        return .{ .line = index };
     } else {
         if (self.source.len != 0) return error.MalformedCommand;
         return null;
