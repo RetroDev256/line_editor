@@ -160,7 +160,6 @@ fn writeQuitCmd(self: *Self, token_data: []const u8) !Command {
 }
 
 fn moveCmd(self: *Self, token_data: []const u8) !Command {
-    std.debug.print("moveCmd: {any}\n", .{token_data});
     const dest = try parseIndex(token_data);
     return switch (try self.lineTarget()) {
         .none => .{ .move = dest },
@@ -301,4 +300,38 @@ test "fuzz parser" {
     const alloc = std.testing.allocator;
     const parsed = parse(alloc, input) catch |err| return handle(err);
     _ = parsed;
+}
+
+fn testParser(alloc: Allocator, expected: Command, source: []const u8) !void {
+    const tokenized = try parse(alloc, source);
+    try std.testing.expectEqualDeep(expected, tokenized);
+}
+
+test "parser" {
+    const alloc = std.testing.allocator;
+    try testParser(alloc, .{ .sub_range = .{
+        .dest = .{ .start = null, .end = .infinity },
+        .before = "bees",
+        .after = "churger",
+    } }, ",$s/bees/churger");
+    try testParser(alloc, .print, "p");
+    try testParser(alloc, .{ .move_line = .{
+        .source = .{ .specific = 0 },
+        .dest = .infinity,
+    } }, "1m$");
+    try testParser(alloc, .{ .insert_text_line = .{
+        .dest = .{ .specific = 122 },
+        .text = "string",
+    } }, "123.string");
+    try testParser(alloc, .{ .write_quit_range = .{ .source = .{
+        .start = .{ .specific = 3 },
+        .end = .{ .specific = 4 },
+    }, .file_out = "output" } }, "4,5wqoutput");
+    try testParser(alloc, .{ .delete_range = .{
+        .start = .{ .specific = 3 },
+        .end = .{ .specific = 4 },
+    } }, "4,5d");
+    try testParser(alloc, .quit, "      q");
+    try testParser(alloc, .{ .write = "    " }, "  w    ");
+    try testParser(alloc, .help, "h");
 }

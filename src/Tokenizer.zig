@@ -144,31 +144,6 @@ fn testTokenizer(alloc: Allocator, expected: []const Token, source: []const u8) 
     }
 }
 
-//fn generateTest(alloc: Allocator, source: []const u8) !void {
-//    const tokenized = try tokenize(alloc, source);
-//    defer alloc.free(tokenized);
-//    std.debug.print("try testTokenizer(alloc,&.{{", .{});
-//    for (tokenized) |token| {
-//        std.debug.print(
-//            ".{{.tag=.{s},.loc=.{{.start={},.end={}}}}},",
-//            .{ @tagName(token.tag), token.loc.start, token.loc.end },
-//        );
-//    }
-//    std.debug.print("}},\"{s}\");", .{source});
-//}
-//
-//// manually checked once
-//test "generate" {
-//    try generateTest(std.testing.allocator, ",$s/bees/churger");
-//    try generateTest(std.testing.allocator, "p");
-//    try generateTest(std.testing.allocator, "1m$");
-//    try generateTest(std.testing.allocator, "123.string");
-//    try generateTest(std.testing.allocator, "4,5wqoutput");
-//    try generateTest(std.testing.allocator, "4,5d");
-//    try generateTest(std.testing.allocator, "      q");
-//    try generateTest(std.testing.allocator, "h");
-//}
-
 test "tokenizer" {
     const alloc = std.testing.allocator;
     try testTokenizer(alloc, &.{
