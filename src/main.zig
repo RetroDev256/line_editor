@@ -44,5 +44,5 @@ fn runOnce(
 }
 
 test {
-    _ = &std.testing.refAllDecls(@This());
+    _ = &std.testing.refAllDeclsRecursive(@This());
 }

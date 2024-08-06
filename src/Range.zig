@@ -24,7 +24,3 @@ pub fn clamp(self: Self, length: usize) !Self {
         .end = if (self.end) |end| try end.clamp(length) else null,
     };
 }
-
-test {
-    _ = &std.testing.refAllDecls(@This());
-}

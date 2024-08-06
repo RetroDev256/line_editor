@@ -86,19 +86,15 @@ fn next(self: *Self) Token {
                     self.index += 1; // skip past for next token
                     break;
                 },
-                's', '.' => {
+                's', '.', 'm' => {
                     switch (c) {
                         's' => result.tag = .substitute_cmd,
                         '.' => result.tag = .insert_cmd,
+                        'm' => result.tag = .move_cmd,
                         else => unreachable,
                     }
                     result.loc.start += 1; // location IS the string
                     state = .eof_string;
-                },
-                'm' => {
-                    result.tag = .move_cmd;
-                    result.loc.start += 1; // location IS the number
-                    state = .eof_string; // not number, we want $
                 },
                 'w' => {
                     result.tag = .write_cmd;
@@ -133,13 +129,80 @@ fn next(self: *Self) Token {
 
 // Testing
 
-test {
-    _ = &std.testing.refAllDecls(@This());
-}
-
-test "fuzz" {
+test "fuzz tokenizer" {
     const input = std.testing.fuzzInput(.{});
     const alloc = std.testing.allocator;
     const tokenized = try tokenize(alloc, input);
     alloc.free(tokenized);
+}
+
+fn testTokenizer(alloc: Allocator, expected: []const Token, source: []const u8) !void {
+    const tokenized = try tokenize(alloc, source);
+    defer alloc.free(tokenized);
+    for (expected, tokenized) |expect, actual| {
+        try std.testing.expectEqualDeep(expect, actual);
+    }
+}
+
+//fn generateTest(alloc: Allocator, source: []const u8) !void {
+//    const tokenized = try tokenize(alloc, source);
+//    defer alloc.free(tokenized);
+//    std.debug.print("try testTokenizer(alloc,&.{{", .{});
+//    for (tokenized) |token| {
+//        std.debug.print(
+//            ".{{.tag=.{s},.loc=.{{.start={},.end={}}}}},",
+//            .{ @tagName(token.tag), token.loc.start, token.loc.end },
+//        );
+//    }
+//    std.debug.print("}},\"{s}\");", .{source});
+//}
+//
+//// manually checked once
+//test "generate" {
+//    try generateTest(std.testing.allocator, ",$s/bees/churger");
+//    try generateTest(std.testing.allocator, "p");
+//    try generateTest(std.testing.allocator, "1m$");
+//    try generateTest(std.testing.allocator, "123.string");
+//    try generateTest(std.testing.allocator, "4,5wqoutput");
+//    try generateTest(std.testing.allocator, "4,5d");
+//    try generateTest(std.testing.allocator, "      q");
+//    try generateTest(std.testing.allocator, "h");
+//}
+
+test "tokenizer" {
+    const alloc = std.testing.allocator;
+    try testTokenizer(alloc, &.{
+        .{ .tag = .range_seperator, .loc = .{ .start = 0, .end = 1 } },
+        .{ .tag = .range_file_end, .loc = .{ .start = 1, .end = 2 } },
+        .{ .tag = .substitute_cmd, .loc = .{ .start = 3, .end = 16 } },
+    }, ",$s/bees/churger");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .print_cmd, .loc = .{ .start = 0, .end = 1 } },
+    }, "p");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .number, .loc = .{ .start = 0, .end = 1 } },
+        .{ .tag = .move_cmd, .loc = .{ .start = 2, .end = 3 } },
+    }, "1m$");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .number, .loc = .{ .start = 0, .end = 3 } },
+        .{ .tag = .insert_cmd, .loc = .{ .start = 4, .end = 10 } },
+    }, "123.string");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .number, .loc = .{ .start = 0, .end = 1 } },
+        .{ .tag = .range_seperator, .loc = .{ .start = 1, .end = 2 } },
+        .{ .tag = .number, .loc = .{ .start = 2, .end = 3 } },
+        .{ .tag = .write_quit_cmd, .loc = .{ .start = 5, .end = 11 } },
+    }, "4,5wqoutput");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .number, .loc = .{ .start = 0, .end = 1 } },
+        .{ .tag = .range_seperator, .loc = .{ .start = 1, .end = 2 } },
+        .{ .tag = .number, .loc = .{ .start = 2, .end = 3 } },
+        .{ .tag = .delete_cmd, .loc = .{ .start = 3, .end = 4 } },
+    }, "4,5d");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .quit_cmd, .loc = .{ .start = 6, .end = 7 } },
+    }, "      q");
+    try testTokenizer(alloc, &.{
+        .{ .tag = .help_cmd, .loc = .{ .start = 0, .end = 1 } },
+    }, "h");
 }

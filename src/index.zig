@@ -30,7 +30,3 @@ pub const Index = union(enum) {
         };
     }
 };
-
-test {
-    _ = &std.testing.refAllDecls(@This());
-}

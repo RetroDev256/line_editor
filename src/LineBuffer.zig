@@ -152,7 +152,3 @@ fn checkRange(self: Self, range: Range) !BoundedRange {
     if (bounded.end > self.length()) return error.IndexOutOfBounds;
     return bounded;
 }
-
-test {
-    _ = &std.testing.refAllDecls(@This());
-}

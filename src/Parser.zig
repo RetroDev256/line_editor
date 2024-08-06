@@ -283,10 +283,6 @@ fn parseCommand(self: *Self) !?Command {
     }
 }
 
-test {
-    _ = &std.testing.refAllDecls(@This());
-}
-
 fn handle(err: anyerror) !void {
     return switch (err) {
         error.ReversedRange => {},
@@ -300,7 +296,7 @@ fn handle(err: anyerror) !void {
     };
 }
 
-test "fuzz" {
+test "fuzz parser" {
     const input = std.testing.fuzzInput(.{});
     const alloc = std.testing.allocator;
     const parsed = parse(alloc, input) catch |err| return handle(err);
