@@ -1,9 +1,9 @@
 const std = @import("std");
 const File = std.fs.File;
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
+const builtin = @import("builtin");
 const arg_parser = @import("arg_parser.zig");
-const Runner = @import("Runner.zig");
+const Runner = @import("interpreter/Runner.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

@@ -19,9 +19,9 @@ const Allocator = std.mem.Allocator;
 const Parser = @import("Parser.zig");
 const Command = Parser.Command;
 const LineBuffer = @import("LineBuffer.zig");
-const Index = @import("index.zig").Index;
-const BoundedRange = @import("BoundedRange.zig");
-const Range = @import("Range.zig");
+const Index = @import("selection.zig").Index;
+const BoundedRange = @import("selection.zig").BoundedRange;
+const Range = @import("selection.zig").Range;
 const commands = @import("commands.zig");
 
 alloc: Allocator,

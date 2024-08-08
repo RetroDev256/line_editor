@@ -14,8 +14,8 @@ pub fn parse(parser: *Parser) !Command {
 // Runner impl
 
 const Runner = @import("../Runner.zig");
-const Index = @import("../index.zig").Index;
-const Range = @import("../Range.zig");
+const Index = @import("../selection.zig").Index;
+const Range = @import("../selection.zig").Range;
 
 pub fn run(runner: *Runner) !void {
     // print up to 16 lines by default

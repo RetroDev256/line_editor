@@ -15,8 +15,8 @@ pub fn parse(parser: *Parser, token_data: []const u8) !Command {
 // Runner impl
 
 const Runner = @import("../Runner.zig");
-const Index = @import("../index.zig").Index;
-const Range = @import("../Range.zig");
+const Index = @import("../selection.zig").Index;
+const Range = @import("../selection.zig").Range;
 
 pub fn run(runner: *Runner, dest: Index) !void {
     try runner.buffer.moveLine(runner.line, dest);

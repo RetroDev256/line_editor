@@ -2,9 +2,9 @@ const Self = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const Range = @import("Range.zig");
-const BoundedRange = @import("BoundedRange.zig");
-const Index = @import("index.zig").Index;
+const BoundedRange = @import("selection.zig").BoundedRange;
+const Index = @import("selection.zig").Index;
+const Range = @import("selection.zig").Range;
 
 alloc: Allocator,
 lines: std.ArrayListUnmanaged([]const u8) = .{},

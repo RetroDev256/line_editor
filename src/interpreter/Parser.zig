@@ -3,8 +3,8 @@ const Self = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Tokenizer = @import("Tokenizer.zig");
-const Index = @import("index.zig").Index;
-const Range = @import("Range.zig");
+const Index = @import("selection.zig").Index;
+const Range = @import("selection.zig").Range;
 const commands = @import("commands.zig");
 
 alloc: Allocator,
