@@ -16,16 +16,16 @@ Here is the help text:
   .                     MODE<-COMMAND
   .[STRING]             inserts STRING at LINE, LINE<-LINE + 1
 - - - COMMAND Mode - - -
-  [INDEX?]              LINE<-INDEX (or LINE)
-  [INDEX?].             LINE<-INDEX (or LINE), MODE<-INSERT
-  [INDEX?].[NEW]        LINE<-INDEX (or LINE), inserts NEW at LINE
+  [INDEX?]              LINE <- INDEX (or LINE)
+  [INDEX?].             LINE <- INDEX (or LINE), MODE<-INSERT
+  [INDEX?].[NEW]        LINE <- INDEX (or LINE), inserts NEW at LINE, LINE += 1
   [RANGE?]p             prints RANGE (or LINE)
   [RANGE?]d             deletes RANGE (or LINE)
   [RANGE?]s/[OLD]/[NEW] replaces all OLD to NEW in RANGE (or LINE)
   [RANGE?]m[INDEX]      moves RANGE (or LINE) to INDEX
-  [RANGE?]w[NAME?]      FILE<-NAME (or FILE), saves RANGE (or all) to FILE
-  [RANGE?]wq[NAME?]     same as w varient, but also quits the program
+  [RANGE?]c[INDEX]      copies RANGE (or LINE) to INDEX
+  [RANGE?]w [NAME?]     FILE <- NAME (or FILE), saves RANGE (or all) to FILE
+  [RANGE?]wq [NAME?]    same as w varient, but also quits the program
   q                     exits
   h                     displays this text
-
 ```
