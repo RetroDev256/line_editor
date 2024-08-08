@@ -2,16 +2,21 @@ const std = @import("std");
 
 pub fn build(b: *std.Build) void {
     const package = b.option(bool, "package", "Package the project for distribution") orelse false;
+    const release = b.option(bool, "release", "Turn on release flags and build things tiny") orelse false;
+
+    const optimize = switch (release) {
+        true => .ReleaseSmall,
+        false => b.standardOptimizeOption(.{}),
+    };
 
     if (package) {
-        buildAll(b);
+        buildAll(b, optimize);
     } else {
-        buildNative(b);
+        buildNative(b, optimize);
     }
 }
 
-fn buildAll(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{});
+fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     const test_step = b.step("test", "Run unit tests");
     for (target_strs) |target_str| {
         // build each target and install it
@@ -38,9 +43,17 @@ fn buildAll(b: *std.Build) void {
     }
 }
 
-fn buildNative(b: *std.Build) void {
+const target_strs: []const []const u8 = &.{
+    "aarch64_be-linux",  "aarch64-linux",   "aarch64-windows", "aarch64-macos",
+    "armeb-linux",       "arm-linux",       "x86-linux",       "x86-windows",
+    "mips64el-linux",    "mips64-linux",    "mipsel-linux",    "mips-linux",
+    "powerpc64le-linux", "powerpc64-linux", "powerpc-linux",   "riscv32-linux",
+    "riscv64-linux",     "sparc64-linux",   "wasm32-wasi",     "x86_64-linux",
+    "x86_64-windows",    "x86_64-macos",
+};
+
+fn buildNative(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
 
     // exe step
     const exe = b.addExecutable(.{
@@ -74,17 +87,9 @@ fn buildNative(b: *std.Build) void {
     test_step.dependOn(&run_exe_unit_tests.step);
 }
 
-const target_strs: []const []const u8 = &.{
-    "aarch64_be-linux",  "aarch64-linux",   "aarch64-windows", "aarch64-macos",
-    "armeb-linux",       "arm-linux",       "x86-linux",       "x86-windows",
-    "mips64el-linux",    "mips64-linux",    "mipsel-linux",    "mips-linux",
-    "powerpc64le-linux", "powerpc64-linux", "powerpc-linux",   "riscv32-linux",
-    "riscv64-linux",     "sparc64-linux",   "wasm32-wasi",     "x86_64-linux",
-    "x86_64-windows",    "x86_64-macos",
-};
-
 fn optimizeMore(artifact: *std.Build.Step.Compile) void {
     // some optimizations
+    artifact.root_module.code_model = .small;
     artifact.root_module.omit_frame_pointer = true;
     artifact.root_module.strip = true;
     artifact.dead_strip_dylibs = true;
