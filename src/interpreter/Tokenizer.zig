@@ -17,18 +17,19 @@ pub const Token = struct {
 
     pub const Tag = enum {
         _none,
+
         range_seperator, // ,
         range_file_end, // $
-        delete_cmd, // d
-        print_cmd, // p
-        quit_cmd, // q
-        write_cmd, // w
-        write_quit_cmd, // wq
-        substitute_cmd, // s
-        help_cmd, // h
-        insert_cmd, // starts with .
-        move_cmd, // m
-        string, // starts with / and delimited by /
+        delete, // d
+        print, // p
+        quit, // q
+        write, // w
+        substitute, // s
+        help, // h
+        insert, // starts with .
+        move, // m
+        copy, // c
+
         number, // 123456...
     };
 
@@ -55,8 +56,6 @@ const State = enum {
     start,
     /// delimited by anything but 0...9
     number,
-    /// either the w, or the wq command
-    write,
     /// delimited by eof
     eof_string,
 };
@@ -74,32 +73,29 @@ fn next(self: *Self) Token {
                     result.loc.start += 1;
                 },
                 ',', '$', 'd', 'p', 'q', 'h' => {
-                    switch (c) {
-                        ',' => result.tag = .range_seperator,
-                        '$' => result.tag = .range_file_end,
-                        'd' => result.tag = .delete_cmd,
-                        'p' => result.tag = .print_cmd,
-                        'q' => result.tag = .quit_cmd,
-                        'h' => result.tag = .help_cmd,
+                    result.tag = switch (c) {
+                        ',' => .range_seperator,
+                        '$' => .range_file_end,
+                        'd' => .delete,
+                        'p' => .print,
+                        'q' => .quit,
+                        'h' => .help,
                         else => unreachable,
-                    }
+                    };
                     self.index += 1; // skip past for next token
                     break;
                 },
-                's', '.', 'm' => {
-                    switch (c) {
-                        's' => result.tag = .substitute_cmd,
-                        '.' => result.tag = .insert_cmd,
-                        'm' => result.tag = .move_cmd,
+                's', '.', 'm', 'w', 'c' => {
+                    result.tag = switch (c) {
+                        's' => .substitute,
+                        '.' => .insert,
+                        'm' => .move,
+                        'w' => .write,
+                        'c' => .copy,
                         else => unreachable,
-                    }
+                    };
                     result.loc.start += 1; // location IS the string
                     state = .eof_string;
-                },
-                'w' => {
-                    result.tag = .write_cmd;
-                    result.loc.start += 1; // location IS the string
-                    state = .write;
                 },
                 '0'...'9' => {
                     result.tag = .number;
@@ -110,14 +106,6 @@ fn next(self: *Self) Token {
             .number => switch (c) {
                 '0'...'9' => {},
                 else => break,
-            },
-            .write => switch (c) {
-                'q' => {
-                    result.tag = .write_quit_cmd;
-                    result.loc.start += 1; // location IS the string
-                    state = .eof_string;
-                },
-                else => state = .eof_string,
             },
             .eof_string => {}, // chew up symbols forever
         }
@@ -149,35 +137,29 @@ test "tokenizer" {
     try testTokenizer(alloc, &.{
         .{ .tag = .range_seperator, .loc = .{ .start = 0, .end = 1 } },
         .{ .tag = .range_file_end, .loc = .{ .start = 1, .end = 2 } },
-        .{ .tag = .substitute_cmd, .loc = .{ .start = 3, .end = 16 } },
+        .{ .tag = .substitute, .loc = .{ .start = 3, .end = 16 } },
     }, ",$s/bees/churger");
     try testTokenizer(alloc, &.{
-        .{ .tag = .print_cmd, .loc = .{ .start = 0, .end = 1 } },
+        .{ .tag = .print, .loc = .{ .start = 0, .end = 1 } },
     }, "p");
     try testTokenizer(alloc, &.{
         .{ .tag = .number, .loc = .{ .start = 0, .end = 1 } },
-        .{ .tag = .move_cmd, .loc = .{ .start = 2, .end = 3 } },
+        .{ .tag = .move, .loc = .{ .start = 2, .end = 3 } },
     }, "1m$");
     try testTokenizer(alloc, &.{
         .{ .tag = .number, .loc = .{ .start = 0, .end = 3 } },
-        .{ .tag = .insert_cmd, .loc = .{ .start = 4, .end = 10 } },
+        .{ .tag = .insert, .loc = .{ .start = 4, .end = 10 } },
     }, "123.string");
     try testTokenizer(alloc, &.{
         .{ .tag = .number, .loc = .{ .start = 0, .end = 1 } },
         .{ .tag = .range_seperator, .loc = .{ .start = 1, .end = 2 } },
         .{ .tag = .number, .loc = .{ .start = 2, .end = 3 } },
-        .{ .tag = .write_quit_cmd, .loc = .{ .start = 5, .end = 11 } },
-    }, "4,5wqoutput");
-    try testTokenizer(alloc, &.{
-        .{ .tag = .number, .loc = .{ .start = 0, .end = 1 } },
-        .{ .tag = .range_seperator, .loc = .{ .start = 1, .end = 2 } },
-        .{ .tag = .number, .loc = .{ .start = 2, .end = 3 } },
-        .{ .tag = .delete_cmd, .loc = .{ .start = 3, .end = 4 } },
+        .{ .tag = .delete, .loc = .{ .start = 3, .end = 4 } },
     }, "4,5d");
     try testTokenizer(alloc, &.{
-        .{ .tag = .quit_cmd, .loc = .{ .start = 6, .end = 7 } },
+        .{ .tag = .quit, .loc = .{ .start = 6, .end = 7 } },
     }, "      q");
     try testTokenizer(alloc, &.{
-        .{ .tag = .help_cmd, .loc = .{ .start = 0, .end = 1 } },
+        .{ .tag = .help, .loc = .{ .start = 0, .end = 1 } },
     }, "h");
 }

@@ -44,33 +44,45 @@ pub fn getRange(self: Self, source_range: Range) ![]const []const u8 {
 }
 
 pub fn moveLine(self: *Self, source_index: Index, dest_index: Index) !void {
-    const dest = try self.checkAppendIndex(dest_index);
+    const dest = try self.checkIndex(dest_index);
     const source = try self.checkIndex(source_index);
     const removed_lined = self.lines.orderedRemove(source);
-    if (dest > source) {
-        self.lines.insertAssumeCapacity(dest - 1, removed_lined);
-    } else self.lines.insertAssumeCapacity(dest - 1, removed_lined);
+    self.lines.insertAssumeCapacity(dest, removed_lined);
 }
 
 pub fn moveRange(self: *Self, source_range: Range, dest_index: Index) !void {
     const source = try self.checkRange(source_range);
+    const dest = try self.checkIndex(dest_index);
+    // check if we would move it out of bounds:
+    if (dest + source.end - source.start > self.length()) return error.MoveOutOfBounds;
+    var moved_lines = std.ArrayListUnmanaged([]const u8){};
+    defer moved_lines.deinit(self.alloc);
+    const lines_to_move = self.lines.items[source.start..source.end];
+    try moved_lines.appendSlice(self.alloc, lines_to_move);
+    const line_count = source.end - source.start;
+    self.lines.replaceRangeAssumeCapacity(source.start, line_count, &.{});
+    try self.lines.insertSlice(self.alloc, dest, moved_lines.items);
+}
+
+pub fn copyLine(self: *Self, source_index: Index, dest_index: Index) !void {
     const dest = try self.checkAppendIndex(dest_index);
+    const source = try self.checkIndex(source_index);
+    const copy = try self.alloc.dupe(u8, self.lines.items[source]);
+    try self.lines.insert(self.alloc, dest, copy);
+}
 
-    // if the destination is inside the section to move, we can just ignore it
-    const after_buffer = dest >= source.end;
-    if (dest < source.start or after_buffer) {
-        var moved_lines = std.ArrayListUnmanaged([]const u8){};
-        defer moved_lines.deinit(self.alloc);
-        const lines_to_move = self.lines.items[source.start..source.end];
-        try moved_lines.appendSlice(self.alloc, lines_to_move);
-        const line_count = source.end - source.start;
-        self.lines.replaceRangeAssumeCapacity(source.start, line_count, &.{});
-
-        if (after_buffer) {
-            const shifted = dest - line_count;
-            try self.lines.insertSlice(self.alloc, shifted, moved_lines.items);
-        } else try self.lines.insertSlice(self.alloc, dest, moved_lines.items);
+pub fn copyRange(self: *Self, source_range: Range, dest_index: Index) !void {
+    const source = try self.checkRange(source_range);
+    const dest = try self.checkAppendIndex(dest_index);
+    var copied_lines = std.ArrayListUnmanaged([]const u8){};
+    defer copied_lines.deinit(self.alloc);
+    const lines_to_copy = self.lines.items[source.start..source.end];
+    try copied_lines.appendSlice(self.alloc, lines_to_copy);
+    for (copied_lines.items) |*line| {
+        // allocate a copy of each line as to prevent double-free
+        line.* = try self.alloc.dupe(u8, line.*);
     }
+    try self.lines.insertSlice(self.alloc, dest, copied_lines.items);
 }
 
 pub fn deleteLine(self: *Self, line_index: Index) !void {
@@ -84,6 +96,13 @@ pub fn deleteRange(self: *Self, target_range: Range) !void {
     for (lines) |line| self.alloc.free(line);
     const target = try self.checkRange(target_range);
     self.lines.replaceRangeAssumeCapacity(target.start, lines.len, &.{});
+}
+
+pub fn replaceLine(self: *Self, line_index: Index, text: []const u8) !void {
+    const line = try self.checkIndex(line_index);
+    self.alloc.free(self.lines.items[line]);
+    const owned = try self.alloc.dupe(u8, text);
+    self.lines.replaceRangeAssumeCapacity(line, 1, &.{owned});
 }
 
 pub fn appendFile(self: *Self, file_name: []const u8) !void {
