@@ -29,3 +29,15 @@ Here is the help text:
   q                     exits
   h                     displays this text
 ```
+
+TODO:
+- add ^ as alias for index 0 in tokenizer (and parser)
+- add basic regex (^ and $ and . and ? and * matching) for Substitute.zig
+- undo and redo tree (move deleted/replaced lines back and forth between LineBuffer?)
+- improved selection.zig (see if we can reduce the usage of the Range struct)
+- raw mode parsing (so we can use our arrow keys in the input)
+- options to toggle aspects of printing:
+    - toggle printing line numbers
+    - toggle printing command prompt
+- remove/reduce error friction, default action in most cases
+- out of bounds options in LineBuffer.zig (clamp vs spam newlines)
