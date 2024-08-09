@@ -87,7 +87,7 @@ fn parseCommand(self: *Self) !?Command {
         switch (token.tag) {
             .number => {
                 const num_str = token.data(self.source);
-                const index = try parseIndex(num_str);
+                const index = parseIndex(num_str) catch return error.Malformed;
                 try self.updateRange(index);
             },
             .range_file_end => try self.updateRange(.infinity),
@@ -147,10 +147,7 @@ fn parseCommand(self: *Self) !?Command {
 // Testing
 
 fn handle(err: anyerror) !void {
-    return switch (err) {
-        error.Malformed => {},
-        else => err,
-    };
+    if (err != error.Malformed) return err;
 }
 
 test "fuzz parser" {
