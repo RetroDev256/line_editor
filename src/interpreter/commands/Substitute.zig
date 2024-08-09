@@ -24,6 +24,7 @@ after: []const u8,
 
 pub fn parse(sel: Selection, token_data: []const u8) !Self {
     const first = find(token_data, 1, '/') catch return error.Malformed;
+    if (first != 0) return error.Malformed; // must be s/
     const second = find(token_data, 2, '/') catch return error.Malformed;
     return .{
         .sel = sel,
