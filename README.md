@@ -31,7 +31,6 @@ Here is the help text:
 ```
 
 TODO:
-- add ^ as alias for index 0 in tokenizer (and parser)
 - add basic regex (^ and $ and . and ? and * matching) for Substitute.zig
 - undo and redo tree (move deleted/replaced lines back and forth between LineBuffer?)
 - improved selection.zig (see if we can reduce the usage of the Range struct)
