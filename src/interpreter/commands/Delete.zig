@@ -2,7 +2,7 @@ const Self = @This();
 
 const LineBuffer = @import("../LineBuffer.zig");
 const Selection = @import("../selection.zig").Selection;
-const Index = @import("../selection.zig").Index;
+const Range = @import("../Range.zig");
 
 // Command data
 
@@ -16,10 +16,7 @@ pub fn parse(sel: Selection) !Self {
 
 // Runner implementation
 
-pub fn run(self: Self, buffer: *LineBuffer, current_line: Index) !void {
-    switch (self.sel) {
-        .unspecified => try buffer.deleteLine(current_line),
-        .line => |line| try buffer.deleteLine(line),
-        .range => |range| try buffer.deleteRange(range),
-    }
+pub fn run(self: Self, buffer: *LineBuffer, current_line: usize) !void {
+    const source = self.sel.resolve(Range.single(current_line));
+    try buffer.delete(source);
 }

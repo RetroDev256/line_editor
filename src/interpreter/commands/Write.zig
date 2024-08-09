@@ -2,6 +2,7 @@ const Self = @This();
 
 const LineBuffer = @import("../LineBuffer.zig");
 const Selection = @import("../selection.zig").Selection;
+const Range = @import("../Range.zig");
 
 // Command data
 
@@ -59,9 +60,9 @@ pub fn run(self: Self, buffer: *LineBuffer, file: *?[]const u8, exit: *bool) !vo
     }
     const file_name = file.* orelse return error.NoOutputSpecified;
     switch (self.sel) {
-        .unspecified => try buffer.save(file_name),
-        .line => |line| try buffer.saveLine(file_name, line),
-        .range => |range| try buffer.saveRange(file_name, range),
+        .unspecified => try buffer.save(file_name, Range.complete(buffer.length())),
+        .line => |line| try buffer.save(file_name, Range.single(line)),
+        .range => |range| try buffer.save(file_name, range),
     }
     exit.* = exit.* or self.quit;
 }

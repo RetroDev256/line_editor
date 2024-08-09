@@ -38,11 +38,11 @@ fn runOnce(
     file_in: ?[]const u8,
     file_out: ?[]const u8,
 ) !void {
-    const reader = cmd_in.reader().any();
-    const writer = if (cmd_out) |out_file| out_file.writer().any() else null;
-    var self = try Runner.init(alloc, reader, writer, file_in, file_out);
+    const reader = cmd_in.reader();
+    const writer = if (cmd_out) |out_file| out_file.writer() else null;
+    var self = try Runner.init(alloc, file_in, file_out);
     defer self.deinit();
-    try self.run();
+    try self.run(reader, writer);
 }
 
 test {

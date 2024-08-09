@@ -1,7 +1,6 @@
 const Self = @This();
 
 const std = @import("std");
-const AnyWriter = std.io.AnyWriter;
 const io = @import("../io.zig");
 const Selection = @import("../selection.zig").Selection;
 
@@ -14,7 +13,7 @@ pub fn parse(selection: Selection) !Self {
 
 // Runner implementation
 
-pub fn run(_: Self, writer: ?AnyWriter) !void {
+pub fn run(_: Self, writer: anytype) !void {
     try io.printToCmdOut(writer,
         \\- - - Definitions - - -
         \\  MODE                  COMMAND or INSERT (swap using .)

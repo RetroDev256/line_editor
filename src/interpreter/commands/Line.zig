@@ -1,24 +1,22 @@
 const Self = @This();
 
 const Selection = @import("../selection.zig").Selection;
-const Index = @import("../selection.zig").Index;
 
 // Command data
 
-line: Index,
+line: usize,
 
 // Parser implementation
 
 pub fn parse(sel: Selection) !Self {
-    switch (sel) {
-        .unspecified => return error.Malformed,
-        .line => |line| return .{ .line = line },
-        .range => return error.Malformed,
-    }
+    return switch (sel) {
+        .line => |line| .{ .line = line },
+        else => error.Malformed,
+    };
 }
 
 // Runner implementation
 
-pub fn run(self: Self, current_line: *Index) !void {
+pub fn run(self: Self, current_line: *usize) !void {
     current_line.* = self.line;
 }

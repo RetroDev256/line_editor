@@ -2,7 +2,6 @@ const Self = @This();
 
 const LineBuffer = @import("../LineBuffer.zig");
 const Selection = @import("../selection.zig").Selection;
-const Index = @import("../selection.zig").Index;
 const Mode = @import("../Runner.zig").Mode;
 
 // Command data
@@ -31,7 +30,7 @@ pub fn parse(sel: Selection, token_data: []const u8) !Self {
 
 // Runner implementation
 
-pub fn run(self: Self, buffer: *LineBuffer, current_mode: *Mode, current_line: *Index) !void {
+pub fn run(self: Self, buffer: *LineBuffer, current_mode: *Mode, current_line: *usize) !void {
     switch (self.sel) {
         .unspecified => {},
         .line => |line| current_line.* = line,
@@ -40,7 +39,7 @@ pub fn run(self: Self, buffer: *LineBuffer, current_mode: *Mode, current_line: *
     if (self.insert_mode) {
         current_mode.* = .insert;
     } else {
-        try buffer.insertLine(current_line.*, self.text);
-        current_line.* = current_line.add(1);
+        try buffer.insert(current_line.*, &.{self.text});
+        current_line.* += 1;
     }
 }
