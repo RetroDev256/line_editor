@@ -1,7 +1,3 @@
-// add "copy" command:
-// [RANGE?/INDEX?]c[INDEX]
-// copies the lines in RANGE to INDEX
-
 const Self = @This();
 
 const std = @import("std");
@@ -77,11 +73,6 @@ fn handle(writer: anytype, err: anyerror) !void {
         error.Malformed => "malformed command",
         error.IndexZero => "no zero indexes allowed",
         error.NoOutputSpecified => "no output filename specified",
-        error.IndexOutOfBounds => "index out of bounds",
-        error.EmptyBuffer => "the buffer is empty",
-        error.InvalidNumber => "unable to parse number",
-        error.MoveOutOfBounds => "move creates gap in file",
-        error.ReversedRange => "range must be ascending",
         else => return err,
     };
     try io.printToCmdOut(writer, "Error: {s}\n", .{err_string});
