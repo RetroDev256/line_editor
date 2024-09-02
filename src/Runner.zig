@@ -114,12 +114,10 @@ fn input(self: Self) !InputResult {
 
 // command mode dispatch
 fn handlingLoop(self: *Self) !void {
-    var should_exit: bool = false;
-    loop: while (!should_exit) {
+    loop: while (true) {
         // display command prompt, get input
         try self.write("+ ");
         const user_input = try self.input();
-        should_exit = user_input.reached_eof;
         const cmd = user_input.text;
         defer self.alloc.free(cmd);
         // set up the change list for an undo step
@@ -161,6 +159,8 @@ fn handlingLoop(self: *Self) !void {
         }
         // apply the change to the buffer, make an undo step
         try self.undo.apply(self.alloc, step.items, &self.buffer);
+        // we have reached EOF of the command input, exit
+        if (user_input.reached_eof) break :loop;
     }
 }
 
@@ -246,14 +246,12 @@ fn insertCommand(
         0 => {
             self.state.line = range.start;
             // infinite mode is escaped only by inputting a single period
-            var should_exit: bool = false; // this is for if we hit EOF
-            insert_inf: while (!should_exit) {
+            insert_inf: while (true) {
                 // get user input
                 try self.printLineNumber(self.state.line);
                 const user_input = try self.input();
                 const text = user_input.text;
                 defer self.alloc.free(text);
-                should_exit = user_input.reached_eof;
                 if (text.len == 1 and text[0] == '.') break :insert_inf;
                 // insert the line
                 const lines = Lines.init((&text)[0..1], self.state.line);
@@ -261,6 +259,8 @@ fn insertCommand(
                 errdefer owned.deinit(self.alloc);
                 try step.append(self.alloc, .{ .insert = owned });
                 self.state.line += 1;
+                // reached EOF (useful in scripts)
+                if (user_input.reached_eof) break :insert_inf;
             }
         },
         else => { // one-shot mode
