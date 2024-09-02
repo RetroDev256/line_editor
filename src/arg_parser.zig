@@ -41,6 +41,7 @@ pub fn parseCmdLine(args: []const []const u8) !?Options {
                     return null;
                 }
                 options.file_out = args[arg];
+                state = .start;
             },
             .script_in => {
                 if (options.script_in) |_| {
@@ -48,6 +49,7 @@ pub fn parseCmdLine(args: []const []const u8) !?Options {
                     return null;
                 }
                 options.script_in = args[arg];
+                state = .start;
             },
         }
     }

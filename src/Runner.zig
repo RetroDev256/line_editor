@@ -412,11 +412,7 @@ test "basically the entire thing" {
     var runner = try init(alloc, script, null, initial, null);
     defer runner.deinit();
     try runner.run();
-    LineBuffer.expectEqual(&runner.buffer, expected) catch |err| {
-        const buf_len = runner.buffer.length();
-        try runner.buffer.save("src/testing/actual", .initLen(0, buf_len));
-        return err;
-    };
+    try LineBuffer.expectEqual(&runner.buffer, expected);
     // when we get a clean build, delete our helpful "actual" output
-    std.fs.cwd().deleteFile("src/testing/actual") catch {};
+    try std.fs.cwd().deleteFile("src/testing/actual");
 }

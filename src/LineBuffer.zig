@@ -133,14 +133,14 @@ pub fn expectEqual(buffer: *const Self, lines: []const u8) !void {
     const read_in = stream_in.reader();
     const line_writer = stream_out.writer();
     for (buffer.lines.items, 0..) |actual, line| {
-        defer stream_out.pos = 0;
+        defer stream_out.reset();
         const stream_res = read_in.streamUntilDelimiter(line_writer, '\n', null);
         if (line + 1 == buffer.lines.items.len) {
             try std.testing.expectError(error.EndOfStream, stream_res);
         } else {
             try stream_res;
         }
-        const expected = stream_out.buffer[0..stream_out.pos];
+        const expected = stream_out.getWritten();
         try std.testing.expectEqualSlices(u8, expected, actual);
     }
 }
