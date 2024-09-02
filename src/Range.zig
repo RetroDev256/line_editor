@@ -98,57 +98,60 @@ pub fn parseUsize(num: []const u8) !usize {
 
 // testing
 
+const expectEqual = std.testing.expectEqual;
+const expectError = std.testing.expectError;
+
 // bugs found with this: 1
 test parse {
     const default = initLen(64, 16);
-    try std.testing.expectEqual(initLen(6, 0), parse("7,6", 20, default));
-    try std.testing.expectError(error.InvalidRange, parse("7,5", 20, default));
-    try std.testing.expectError(error.InvalidRange, parse("$,14", 20, default));
-    try std.testing.expectEqual(initLen(0, 0), try parse(",", 0, default));
-    try std.testing.expectEqual(initLen(11, 7), try parse("12,18", 0, default));
-    try std.testing.expectEqual(initLen(0, 18), try parse(",18", 0, default));
-    try std.testing.expectEqual(initLen(6, 4), try parse("7,", 10, default));
-    try std.testing.expectEqual(initLen(9, 1), try parse("$,$", 10, default));
-    try std.testing.expectEqual(initLen(6, 14), try parse("7,$", 20, default));
-    try std.testing.expectEqual(initLen(29, 1), try parse("$", 30, default));
-    try std.testing.expectEqual(default, try parse("", 10, default));
+    try expectEqual(initLen(6, 0), parse("7,6", 20, default));
+    try expectError(error.InvalidRange, parse("7,5", 20, default));
+    try expectError(error.InvalidRange, parse("$,14", 20, default));
+    try expectEqual(initLen(0, 0), try parse(",", 0, default));
+    try expectEqual(initLen(11, 7), try parse("12,18", 0, default));
+    try expectEqual(initLen(0, 18), try parse(",18", 0, default));
+    try expectEqual(initLen(6, 4), try parse("7,", 10, default));
+    try expectEqual(initLen(9, 1), try parse("$,$", 10, default));
+    try expectEqual(initLen(6, 14), try parse("7,$", 20, default));
+    try expectEqual(initLen(29, 1), try parse("$", 30, default));
+    try expectEqual(default, try parse("", 10, default));
 }
 
 test parseableEnd {
-    try std.testing.expectEqual(8, parseableEnd("01234567*"));
-    try std.testing.expectEqual(6, parseableEnd("012345*"));
-    try std.testing.expectEqual(1, parseableEnd("0*"));
-    try std.testing.expectEqual(0, parseableEnd("*"));
-    try std.testing.expectEqual(0, parseableEnd(""));
+    try expectEqual(8, parseableEnd("01234567*"));
+    try expectEqual(6, parseableEnd("012345*"));
+    try expectEqual(1, parseableEnd("0*"));
+    try expectEqual(0, parseableEnd("*"));
+    try expectEqual(0, parseableEnd(""));
 }
 
 test parseLine {
-    try std.testing.expectError(error.NoLastIndex, parseLine("$", 0));
-    try std.testing.expectError(error.OutOfBounds, parseLine("0", 64));
-    try std.testing.expectEqual(null, try parseLine("", 0));
-    try std.testing.expectEqual(null, try parseLine("", 123));
-    try std.testing.expectEqual(null, try parseLine("", 123456));
-    try std.testing.expectEqual(123455, try parseLine("123456", 123));
-    try std.testing.expectEqual(431, try parseLine("432", 123));
-    try std.testing.expectEqual(122, try parseLine("$", 123));
+    try expectError(error.NoLastIndex, parseLine("$", 0));
+    try expectError(error.OutOfBounds, parseLine("0", 64));
+    try expectEqual(null, try parseLine("", 0));
+    try expectEqual(null, try parseLine("", 123));
+    try expectEqual(null, try parseLine("", 123456));
+    try expectEqual(123455, try parseLine("123456", 123));
+    try expectEqual(431, try parseLine("432", 123));
+    try expectEqual(122, try parseLine("$", 123));
 }
 
 test parseRangeExclusiveEnd {
-    try std.testing.expectEqual(122, try parseRangeExclusiveEnd("122", 777));
-    try std.testing.expectEqual(64, try parseRangeExclusiveEnd("64", 32));
-    try std.testing.expectEqual(33, try parseRangeExclusiveEnd("$", 33));
-    try std.testing.expectEqual(0, try parseRangeExclusiveEnd("$", 0));
+    try expectEqual(122, try parseRangeExclusiveEnd("122", 777));
+    try expectEqual(64, try parseRangeExclusiveEnd("64", 32));
+    try expectEqual(33, try parseRangeExclusiveEnd("$", 33));
+    try expectEqual(0, try parseRangeExclusiveEnd("$", 0));
 }
 
 test parseUsize {
-    try std.testing.expectError(error.NoNumberString, parseUsize(""));
-    try std.testing.expectError(error.InvalidUsize, parseUsize("123ohno"));
-    try std.testing.expectError(
+    try expectError(error.NoNumberString, parseUsize(""));
+    try expectError(error.InvalidUsize, parseUsize("123ohno"));
+    try expectError(
         error.NumberTooLarge,
         parseUsize("123456789012345678901234567890123456789012345678901234567890"),
     );
-    try std.testing.expectEqual(123456, try parseUsize("123456"));
-    try std.testing.expectEqual(
+    try expectEqual(123456, try parseUsize("123456"));
+    try expectEqual(
         123456,
         try parseUsize("00000000000000000000000000000000000000000000000000123456"),
     );
