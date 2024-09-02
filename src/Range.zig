@@ -75,7 +75,7 @@ fn parseRangeExclusiveEnd(str: []const u8, line_count: usize) !usize {
 // not using std.fmt.parseInt because this one works just as well,
 // and doesn't take up as much space in the output binary,
 // and allows us to return some more handleable errors
-fn parseUsize(num: []const u8) !usize {
+pub fn parseUsize(num: []const u8) !usize {
     if (num.len == 0) return error.NoNumberString;
     var result: usize = 0;
     for (num) |byte| {

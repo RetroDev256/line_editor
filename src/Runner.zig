@@ -80,13 +80,6 @@ fn print(self: Self, comptime format: []const u8, args: anytype) !void {
     }
 }
 
-// helper function to write if we can
-fn write(self: Self, string: []const u8) !void {
-    if (self.cmd_out) |output| {
-        try output.writeAll(string);
-    }
-}
-
 // helper function to print a line number
 fn printLineNumber(self: Self, line: usize) !void {
     try self.print("{: >6} ", .{line + 1});
@@ -119,7 +112,7 @@ fn input(self: Self) !InputResult {
 fn handlingLoop(self: *Self) !void {
     loop: while (true) {
         // display command prompt, get input
-        try self.write("+ ");
+        try self.print("+ ", .{});
         const user_input = try self.input();
         const cmd = user_input.text;
         defer self.alloc.free(cmd);
@@ -262,7 +255,7 @@ fn insertCommand(
                 errdefer owned.deinit(self.alloc);
                 try step.append(self.alloc, .{ .insert = owned });
                 self.state.line += 1;
-                // reached EOF (useful in scripts)
+                // reached EOF
                 if (user_input.reached_eof) break :insert_inf;
             }
         },
@@ -381,26 +374,30 @@ fn replaceCommand(
     }
 }
 
-// maybe planned: data_str is a usize, determines *how many times* to undo?
+// revert the previous edit to the buffer
 fn undoCommand(
     self: *Self,
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
     if (range_str.len > 0) return error.Malformed;
-    if (data_str.len > 0) return error.Malformed;
-    try self.undo.undo(self.alloc, &self.buffer);
+    const times = if (data_str.len > 0) try Range.parseUsize(data_str) else 1;
+    for (0..times) |_| {
+        try self.undo.undo(self.alloc, &self.buffer);
+    }
 }
 
-// maybe planned: data_str is a usize, determines *how many times* to redo?
+// redo the previous edit to the buffer - "previous edits" are discarded on buffer edit
 fn redoCommand(
     self: *Self,
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
     if (range_str.len > 0) return error.Malformed;
-    if (data_str.len > 0) return error.Malformed;
-    try self.undo.redo(self.alloc, &self.buffer);
+    const times = if (data_str.len > 0) try Range.parseUsize(data_str) else 1;
+    for (0..times) |_| {
+        try self.undo.redo(self.alloc, &self.buffer);
+    }
 }
 
 // testing
