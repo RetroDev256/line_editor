@@ -1,0 +1,415 @@
+const Self = @This();
+
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const List = std.ArrayListUnmanaged;
+const File = std.fs.File;
+const TermSize = @import("TermSize.zig");
+const LineBuffer = @import("LineBuffer.zig");
+const Undo = @import("Undo.zig");
+const Range = @import("Range.zig");
+const Lines = @import("Lines.zig");
+
+const Editor = struct {
+    line: usize = 0,
+    file_out: ?[]const u8 = null,
+};
+
+alloc: Allocator,
+cmd_in: File,
+cmd_out: ?File,
+buffer: LineBuffer,
+state: Editor = .{},
+undo: Undo = .{},
+
+pub fn init(
+    alloc: Allocator,
+    cmd_in: File,
+    cmd_out: ?File,
+    file_in: ?[]const u8,
+    file_out: ?[]const u8,
+) !@This() {
+    const buffer = try LineBuffer.init(alloc, file_in);
+    return .{
+        .alloc = alloc,
+        .cmd_in = cmd_in,
+        .cmd_out = cmd_out,
+        .buffer = buffer,
+        .state = .{ .file_out = file_out orelse file_in },
+    };
+}
+
+pub fn deinit(self: *@This()) void {
+    self.buffer.deinit(self.alloc);
+    self.undo.deinit(self.alloc);
+    self.* = undefined;
+}
+
+// executes the runner, handling all errors
+pub fn run(self: *Self) !void {
+    while (true) {
+        if (self.handlingLoop()) |_| break else |err| {
+            const err_string = switch (err) {
+                error.Malformed => "Malformed command",
+                error.InvalidRange => "Invalid range",
+                error.OutOfBounds => "Line out of bounds",
+                error.OutOfMemory => "Out of memory",
+                error.NoLastIndex => "Empty buffer - No last line",
+                error.FilenameNotSet => "Output file not set",
+                error.NoMoreUndoSteps => "No more undo steps",
+                error.NoMoreRedoSteps => "No more redo steps",
+                error.NumberTooLarge => "Number too large",
+                else => return err,
+            };
+            try self.print("Error: {s}\n", .{err_string});
+        }
+    }
+}
+
+// helper function to print if we can
+fn print(self: Self, comptime format: []const u8, args: anytype) !void {
+    if (self.cmd_out) |output| {
+        try output.writer().print(format, args);
+    }
+}
+
+// helper function to write if we can
+fn write(self: Self, string: []const u8) !void {
+    if (self.cmd_out) |output| {
+        try output.writeAll(string);
+    }
+}
+
+// helper function to print a line number ($ if it is the last one)
+fn printLineNumber(self: Self, line: usize) !void {
+    if (line + 1 == self.buffer.length()) {
+        try self.write(" " ** 5 ++ "$ ");
+    } else {
+        try self.print("{: >6} ", .{line + 1});
+    }
+}
+
+const InputResult = struct {
+    reached_eof: bool,
+    text: []const u8,
+};
+
+// helper function to get user input
+fn input(self: Self) !InputResult {
+    var cmd = List(u8){};
+    defer cmd.deinit(self.alloc);
+    const cmd_w = cmd.writer(self.alloc);
+    // read user result, break on "enter"
+    const result = self.cmd_in.reader().streamUntilDelimiter(cmd_w, '\n', null);
+    result catch |err| switch (err) {
+        error.EndOfStream => {
+            const text = try cmd.toOwnedSlice(self.alloc);
+            return .{ .reached_eof = true, .text = text };
+        },
+        else => return err,
+    };
+    const text = try cmd.toOwnedSlice(self.alloc);
+    return .{ .reached_eof = false, .text = text };
+}
+
+// command mode dispatch
+fn handlingLoop(self: *Self) !void {
+    var should_exit: bool = false;
+    loop: while (!should_exit) {
+        // display command prompt, get input
+        try self.write("+ ");
+        const user_input = try self.input();
+        should_exit = user_input.reached_eof;
+        const cmd = user_input.text;
+        defer self.alloc.free(cmd);
+        // set up the change list for an undo step
+        var step = List(Undo.Change){};
+        defer {
+            for (step.items) |change| {
+                change.deinit(self.alloc);
+            }
+            step.deinit(self.alloc);
+        }
+        // locate the "range" section of the command
+        const range_end = Range.parseableEnd(cmd);
+        const range_str = cmd[0..range_end];
+        const cmd_str = cmd[range_end..];
+        switch (cmd_str.len) {
+            0 => try self.lineCommand(range_str),
+            else => {
+                const data_str = cmd_str[1..];
+                switch (cmd_str[0]) {
+                    // commands which don't modify the buffer
+                    'p' => try self.printCommand(range_str, data_str), // print
+                    'w' => try self.writeCommand(range_str, data_str), // write
+                    // commands which modify the buffer
+                    '.' => try self.insertCommand(&step, range_str, data_str), // insert
+                    'd' => try self.deleteCommand(&step, range_str, data_str), // delete
+                    's' => @panic("Todo"), // substitute
+                    'm' => try self.moveCommand(&step, range_str, data_str), // move
+                    'c' => try self.copyCommand(&step, range_str, data_str), // copy
+                    'x' => try self.replaceCommand(&step, range_str, data_str), // change
+                    // undo/redo (will probably modify the buffer)
+                    'u' => try self.undoCommand(range_str, data_str), // undo
+                    'r' => try self.redoCommand(range_str, data_str), // redo
+                    // commands which don't read the buffer
+                    'q' => break :loop, // quit
+                    '?' => @panic("Todo"), // help
+                    else => return error.Malformed,
+                }
+            },
+        }
+        // apply the change to the buffer, make an undo step
+        try self.undo.apply(self.alloc, step.items, &self.buffer);
+    }
+}
+
+// sets the current line
+fn lineCommand(self: *Self, range_str: []const u8) !void {
+    const default = Range.initLen(self.state.line, 1);
+    const line_count = self.buffer.length();
+    const range = try Range.parse(range_str, line_count, default);
+    if (range.length() > 1) {
+        return error.Malformed;
+    } else if (range.length() == 1) {
+        self.state.line = range.start;
+    }
+}
+
+// prints 16 lines at current line by default - updates current line to after last printed
+// planned: regex after the print command will print lines in the range that match
+fn printCommand(
+    self: *Self,
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    if (data_str.len > 0) return error.Malformed;
+    // by default, fill the screen with lines we print
+    const line_count = blk: {
+        const cmd_out_file = self.cmd_out orelse return; // can't print otherwise
+        const term_size = try TermSize.size(cmd_out_file);
+        if (term_size) |size| {
+            break :blk @max(8, size.height -| 1);
+        } else {
+            break :blk 16;
+        }
+    };
+    const default = Range.initLen(self.state.line, @intCast(line_count));
+    const range = try Range.parse(range_str, self.buffer.length(), default);
+    if (self.buffer.get(range)) |lines| {
+        self.state.line += lines.text.len;
+        for (lines.text, range.start..) |text, line| {
+            try self.printLineNumber(line);
+            try self.print("{s}\n", .{text});
+        }
+    }
+}
+
+// writes the range to the specified (or last specified) file name
+// if the last line printed is the last line in the buffer, no newline
+// is appended to the output file.
+fn writeCommand(
+    self: *Self,
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    const file_name = switch (data_str.len) {
+        0 => if (self.state.file_out) |name| blk: {
+            break :blk name;
+        } else return error.FilenameNotSet,
+        else => data_str,
+    };
+    const len = self.buffer.length();
+    const default = Range.initLen(0, len);
+    const range = try Range.parse(range_str, len, default);
+    try self.buffer.save(file_name, range);
+}
+
+// without command data, drops into insert mode at the specified line
+// command is special - $ doesn't refer to the last line, but right after
+fn insertCommand(
+    self: *Self,
+    step: *List(Undo.Change),
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    const default = Range.initLen(self.state.line, 1);
+    // allow us to insert right after the buffer - using $
+    const insert_len = self.buffer.length() + 1;
+    const range = try Range.parse(range_str, insert_len, default);
+    if (range.start > self.buffer.length()) {
+        // don't write out-of-bounds, resize to write at wherever
+        try step.append(self.alloc, .{ .resize = range.start });
+    }
+    if (range.length() != 1) return error.Malformed;
+    switch (data_str.len) {
+        0 => {
+            self.state.line = range.start;
+            // infinite mode is escaped only by inputting a single period
+            var should_exit: bool = false; // this is for if we hit EOF
+            insert_inf: while (!should_exit) {
+                // get user input
+                try self.printLineNumber(self.state.line);
+                const user_input = try self.input();
+                const text = user_input.text;
+                defer self.alloc.free(text);
+                should_exit = user_input.reached_eof;
+                if (text.len == 1 and text[0] == '.') break :insert_inf;
+                // insert the line
+                const lines = Lines.init((&text)[0..1], self.state.line);
+                const owned = try lines.dupe(self.alloc);
+                errdefer owned.deinit(self.alloc);
+                try step.append(self.alloc, .{ .insert = owned });
+                self.state.line += 1;
+            }
+        },
+        else => { // one-shot mode
+            const lines = Lines.init((&data_str)[0..1], range.start);
+            const owned = try lines.dupe(self.alloc);
+            errdefer owned.deinit(self.alloc);
+            try step.append(self.alloc, .{ .insert = owned });
+            self.state.line = range.end;
+        },
+    }
+}
+
+// deletes lines specified in the range. Sets current line to first index deleted
+// planned: regex after the delete command will delete lines in the range that match
+fn deleteCommand(
+    self: *Self,
+    step: *List(Undo.Change),
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    if (data_str.len > 0) return error.Malformed;
+    const default = Range.initLen(self.state.line, 1);
+    const range = try Range.parse(range_str, self.buffer.length(), default);
+    self.state.line = range.start;
+    try step.append(self.alloc, .{ .delete = range });
+}
+
+// move one range of text to another location (defined by data_str)
+fn moveCommand(
+    self: *Self,
+    step: *List(Undo.Change),
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    const line_count = self.buffer.length();
+    // plus one, because we can move to right after the other text (using $)
+    const move_dest_maybe = try Range.parseLine(data_str, line_count + 1);
+    const move_dest = move_dest_maybe orelse return error.Malformed;
+    if (move_dest > self.buffer.length()) {
+        // don't move out-of-bounds, resize to copy wherever
+        try step.append(self.alloc, .{ .resize = move_dest });
+    }
+    const default = Range.initLen(self.state.line, 1);
+    const range = try Range.parse(range_str, line_count, default);
+    const move_text = self.buffer.get(range) orelse return error.OutOfBounds;
+    var owned = try move_text.dupe(self.alloc);
+    errdefer owned.deinit(self.alloc);
+    try step.append(self.alloc, .{ .delete = move_text.range() });
+    // insert at the correct location (deleting shifts further items)
+    if (move_dest > move_text.start) {
+        owned.start = move_dest - move_text.text.len;
+    } else {
+        owned.start = move_dest;
+    }
+    try step.append(self.alloc, .{ .insert = owned });
+}
+
+// copy one range of text to another location (defined by data_str)
+fn copyCommand(
+    self: *Self,
+    step: *List(Undo.Change),
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    const line_count = self.buffer.length();
+    // plus one, because we can copy to right after the other text (using $)
+    const copy_dest_maybe = try Range.parseLine(data_str, line_count + 1);
+    const copy_dest = copy_dest_maybe orelse return error.Malformed;
+    if (copy_dest > self.buffer.length()) {
+        // don't copy out-of-bounds, resize to copy wherever
+        try step.append(self.alloc, .{ .resize = copy_dest });
+    }
+    const default = Range.initLen(self.state.line, 1);
+    const range = try Range.parse(range_str, line_count, default);
+    const copy_text = self.buffer.get(range) orelse return error.OutOfBounds;
+    var owned = try copy_text.dupe(self.alloc);
+    owned.start = copy_dest;
+    errdefer owned.deinit(self.alloc);
+    try step.append(self.alloc, .{ .insert = owned });
+}
+
+// replaces lines with user input (if data_str.len == 0), or an edit prompt
+fn replaceCommand(
+    self: *Self,
+    step: *List(Undo.Change),
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    const default = Range.initLen(self.state.line, 1);
+    const range = try Range.parse(range_str, self.buffer.length(), default);
+    self.state.line = range.start;
+    switch (data_str.len) {
+        // finite mode is escaped only by replacing the entire range
+        0 => replace_finite: for (range.start..range.end) |line| {
+            // get user input
+            try self.printLineNumber(self.state.line);
+            const user_input = try self.input();
+            const text = user_input.text;
+            defer self.alloc.free(text);
+            // insert the line
+            const lines = Lines.init((&text)[0..1], line);
+            const owned = try lines.dupe(self.alloc);
+            errdefer owned.deinit(self.alloc);
+            try step.append(self.alloc, .{ .replace = owned });
+            // exit if we had hit EOF
+            if (user_input.reached_eof) break :replace_finite;
+        },
+        // replace the entire range with data_str
+        else => for (range.start..range.end) |line| {
+            const lines = Lines.init((&data_str)[0..1], line);
+            const owned = try lines.dupe(self.alloc);
+            errdefer owned.deinit(self.alloc);
+            try step.append(self.alloc, .{ .replace = owned });
+        },
+    }
+}
+
+// maybe planned: data_str is a usize, determines *how many times* to undo?
+fn undoCommand(
+    self: *Self,
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    if (range_str.len > 0) return error.Malformed;
+    if (data_str.len > 0) return error.Malformed;
+    try self.undo.undo(self.alloc, &self.buffer);
+}
+
+// maybe planned: data_str is a usize, determines *how many times* to redo?
+fn redoCommand(
+    self: *Self,
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    if (range_str.len > 0) return error.Malformed;
+    if (data_str.len > 0) return error.Malformed;
+    try self.undo.redo(self.alloc, &self.buffer);
+}
+
+// testing
+
+test "basically the entire thing" {
+    const alloc = std.testing.allocator;
+    const expected = @embedFile("testing/expected");
+    const script = try std.fs.cwd().openFile("src/testing/script", .{});
+    defer script.close();
+    const initial = "src/testing/initial";
+    var runner = try init(alloc, script, null, initial, null);
+    defer runner.deinit();
+    try runner.run();
+    try LineBuffer.expectEqual(&runner.buffer, expected);
+}
