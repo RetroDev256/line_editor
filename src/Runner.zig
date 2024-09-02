@@ -87,13 +87,9 @@ fn write(self: Self, string: []const u8) !void {
     }
 }
 
-// helper function to print a line number ($ if it is the last one)
+// helper function to print a line number
 fn printLineNumber(self: Self, line: usize) !void {
-    if (line + 1 == self.buffer.length()) {
-        try self.write(" " ** 5 ++ "$ ");
-    } else {
-        try self.print("{: >6} ", .{line + 1});
-    }
+    try self.print("{: >6} ", .{line + 1});
 }
 
 const InputResult = struct {
