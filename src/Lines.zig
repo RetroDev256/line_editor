@@ -15,7 +15,7 @@ pub fn init(text: []const []const u8, start: usize) Self {
 }
 
 pub fn range(self: Self) Range {
-    return Range.initLen(self.start, self.text.len);
+    return .initLen(self.start, self.text.len);
 }
 
 pub fn dupe(self: Self, alloc: Allocator) !Self {

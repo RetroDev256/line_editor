@@ -1,5 +1,4 @@
 const std = @import("std");
-const File = std.fs.File;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const arg_parser = @import("arg_parser.zig");
@@ -33,7 +32,7 @@ fn run(alloc: Allocator) !void {
     // if a script is supplied, don't supply command output
     const output = if (opt.script_in == null) std.io.getStdOut() else null;
     // let 'er rip!
-    var runner = try Runner.init(alloc, input, output, opt.file_in, opt.file_out);
+    var runner: Runner = try .init(alloc, input, output, opt.file_in, opt.file_out);
     defer runner.deinit();
     try runner.run();
 }

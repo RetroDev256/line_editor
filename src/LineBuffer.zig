@@ -1,23 +1,26 @@
 const Self = @This();
 
 const std = @import("std");
+const List = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
 const Range = @import("Range.zig");
 const Lines = @import("Lines.zig");
 
-lines: std.ArrayListUnmanaged([]const u8) = .{},
+lines: List([]const u8),
+
+pub const empty: Self = .{ .lines = .empty };
 
 // init/deinit
 
 pub fn init(alloc: Allocator, file_name: ?[]const u8) !Self {
-    var self: Self = .{};
+    var self: Self = .empty;
     if (file_name) |name| {
         // in the case of loading an empty file, create a new file
         const file = try std.fs.cwd().createFile(name, .{ .read = true, .truncate = false });
         defer file.close();
         const reader = file.reader();
         // read the file in line-by-line, making sure to capture any last newline
-        var line_text = std.ArrayListUnmanaged(u8){};
+        var line_text: List(u8) = .empty;
         defer line_text.deinit(alloc);
         const writer = line_text.writer(alloc);
         while (true) {
@@ -26,7 +29,7 @@ pub fn init(alloc: Allocator, file_name: ?[]const u8) !Self {
             const result = reader.streamUntilDelimiter(writer, '\n', null);
             // insert the loaded line at the end of the file
             const text = (&line_text.items)[0..1];
-            const line = Lines.init(text, self.length());
+            const line: Lines = .init(text, self.length());
             try self.insert(alloc, line);
             // we have only finished once we have hit EOF
             result catch |err| switch (err) {
@@ -50,7 +53,7 @@ pub fn get(self: Self, range: Range) ?Lines {
     const end = @min(range.end, self.length());
     if (range.start >= end) return null;
     const text = self.lines.items[range.start..end];
-    return Lines.init(text, range.start);
+    return .init(text, range.start);
 }
 
 pub fn length(self: Self) usize {
@@ -109,7 +112,7 @@ pub fn resize(self: *Self, alloc: Allocator, len: usize) !void {
         try self.lines.appendNTimes(alloc, &.{}, added_amount);
     } else if (len < self.length()) {
         const start = self.length() - len;
-        const range = Range.initLen(start, len);
+        const range: Range = .initLen(start, len);
         if (self.get(range)) |to_remove| {
             for (to_remove.text) |line| {
                 alloc.free(line);

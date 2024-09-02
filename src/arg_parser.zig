@@ -1,9 +1,15 @@
 const std = @import("std");
 
 pub const Options = struct {
-    file_in: ?[]const u8 = null,
-    file_out: ?[]const u8 = null,
-    script_in: ?[]const u8 = null,
+    file_in: ?[]const u8,
+    file_out: ?[]const u8,
+    script_in: ?[]const u8,
+
+    pub const blank: Options = .{
+        .file_in = null,
+        .file_out = null,
+        .script_in = null,
+    };
 };
 
 const State = enum {
@@ -13,7 +19,7 @@ const State = enum {
 };
 
 pub fn parseCmdLine(args: []const []const u8) !?Options {
-    var options: Options = .{};
+    var options: Options = .blank;
     var state: State = .start;
     var arg: usize = 1; // skip the program itself
     while (arg < args.len) : (arg += 1) {

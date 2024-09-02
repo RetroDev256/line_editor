@@ -39,7 +39,7 @@ pub const Change = union(enum) {
                     buffer.delete(alloc, old.range());
                     return .{ .insert = owned };
                 } else {
-                    return .{ .insert = Lines.init(&.{}, 0) };
+                    return .{ .insert = .init(&.{}, 0) };
                 }
             },
             .resize => |new| {
@@ -59,8 +59,13 @@ pub const Change = union(enum) {
 };
 
 // multiple Changes to a LineBuffer may constitute one undo/redo step
-undos: List([]const Change) = .{},
-redos: List([]const Change) = .{},
+undos: List([]const Change),
+redos: List([]const Change),
+
+pub const empty: Self = .{
+    .undos = .empty,
+    .redos = .empty,
+};
 
 pub fn deinit(self: *Self, alloc: Allocator) void {
     freeStepList(alloc, self.undos);
@@ -139,28 +144,28 @@ fn freeStepList(alloc: Allocator, list: List([]const Change)) void {
 
 test "undo and redo" {
     const alloc = std.testing.allocator;
-    var buffer = try LineBuffer.init(alloc, null);
+    var buffer: LineBuffer = try .init(alloc, null);
     defer buffer.deinit(alloc);
 
-    var undos: Self = .{};
+    var undos: Self = .empty;
     defer undos.deinit(alloc);
 
     const steps: []const []const Change = &.{
-        &.{.{ .insert = Lines.init(&.{"Hello, World!"}, 0) }},
-        &.{.{ .insert = Lines.init(&.{"This is Line 2"}, 1) }},
-        &.{.{ .insert = Lines.init(&.{"This is Line 1"}, 0) }},
-        &.{.{ .replace = Lines.init(&.{"Goodbye, World!"}, 1) }},
-        &.{.{ .delete = Range.initLen(1, 1) }},
-        &.{.{ .insert = Lines.init(&.{
+        &.{.{ .insert = .init(&.{"Hello, World!"}, 0) }},
+        &.{.{ .insert = .init(&.{"This is Line 2"}, 1) }},
+        &.{.{ .insert = .init(&.{"This is Line 1"}, 0) }},
+        &.{.{ .replace = .init(&.{"Goodbye, World!"}, 1) }},
+        &.{.{ .delete = .initLen(1, 1) }},
+        &.{.{ .insert = .init(&.{
             "This is Line 3",
             "This is Line 4",
             "This is Line 5",
         }, 2) }},
-        &.{.{ .replace = Lines.init(&.{
+        &.{.{ .replace = .init(&.{
             "Line 3 is redacted",
             "Line 4 is redacted",
         }, 2) }},
-        &.{.{ .delete = Range.initLen(1, 3) }},
+        &.{.{ .delete = .initLen(1, 3) }},
         &.{.{ .resize = 5 }},
     };
 
