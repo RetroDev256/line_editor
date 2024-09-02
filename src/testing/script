@@ -10,3 +10,13 @@ This is *not* the initial file.
 5
 x
 We have redacted these lines:
+$xfile has been *very* modified.
+$.
+
+This line will appear 8 times.
+.
+$c$
+14,c$
+14,c$
+14,17m4
+3c8

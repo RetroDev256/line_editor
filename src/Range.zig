@@ -12,7 +12,10 @@ pub fn parse(str: []const u8, line_count: usize, default: Self) !Self {
     if (std.mem.indexOfScalar(u8, str, ',')) |sep| {
         const start = try parseLine(str[0..sep], line_count) orelse 0;
         const end_exclusive = try parseRangeExclusiveEnd(str[sep + 1 ..], line_count);
-        if (start >= end_exclusive) return error.InvalidRange;
+        // allow ranges of zero length, but not of negative length
+        // the user may want a zero-length range to effect the editor state
+        // but not anything in the buffer.
+        if (start > end_exclusive) return error.InvalidRange;
         return .{ .start = start, .end = end_exclusive };
     } else if (try parseLine(str, line_count)) |line| {
         return initLen(line, 1);
@@ -95,11 +98,13 @@ fn parseUsize(num: []const u8) !usize {
 
 // testing
 
+// bugs found with this: 1
 test parse {
     const default = initLen(64, 16);
-    try std.testing.expectError(error.InvalidRange, parse("7,6", 20, default));
+    try std.testing.expectEqual(initLen(6, 0), parse("7,6", 20, default));
     try std.testing.expectError(error.InvalidRange, parse("7,5", 20, default));
     try std.testing.expectError(error.InvalidRange, parse("$,14", 20, default));
+    try std.testing.expectEqual(initLen(0, 0), try parse(",", 0, default));
     try std.testing.expectEqual(initLen(11, 7), try parse("12,18", 0, default));
     try std.testing.expectEqual(initLen(0, 18), try parse(",18", 0, default));
     try std.testing.expectEqual(initLen(6, 4), try parse("7,", 10, default));

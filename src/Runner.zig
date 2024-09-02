@@ -54,6 +54,8 @@ pub fn deinit(self: *@This()) void {
 pub fn run(self: *Self) !void {
     while (true) {
         if (self.handlingLoop()) |_| break else |err| {
+            // if we can't display the error, just hard error
+            if (self.cmd_out == null) return err;
             const err_string = switch (err) {
                 error.Malformed => "Malformed command",
                 error.InvalidRange => "Invalid range",
@@ -305,7 +307,7 @@ fn moveCommand(
     const move_dest_maybe = try Range.parseLine(data_str, line_count + 1);
     const move_dest = move_dest_maybe orelse return error.Malformed;
     if (move_dest > self.buffer.length()) {
-        // don't move out-of-bounds, resize to copy wherever
+        // don't move out-of-bounds, resize to move wherever
         try step.append(self.alloc, .{ .resize = move_dest });
     }
     const default: Range = .initLen(self.state.line, 1);
@@ -407,6 +409,7 @@ fn redoCommand(
 
 // testing
 
+// bugs found with this: 2
 test "basically the entire thing" {
     const alloc = std.testing.allocator;
     const expected = @embedFile("testing/expected");
@@ -416,5 +419,11 @@ test "basically the entire thing" {
     var runner = try init(alloc, script, null, initial, null);
     defer runner.deinit();
     try runner.run();
-    try LineBuffer.expectEqual(&runner.buffer, expected);
+    LineBuffer.expectEqual(&runner.buffer, expected) catch |err| {
+        const buf_len = runner.buffer.length();
+        try runner.buffer.save("src/testing/actual", .initLen(0, buf_len));
+        return err;
+    };
+    // when we get a clean build, delete our helpful "actual" output
+    std.fs.cwd().deleteFile("src/testing/actual") catch {};
 }

@@ -1,6 +1,11 @@
 This is *not* the initial file.
 as you can see, it has a few lines inside of it.
 
+This line will appear 8 times.
+This line will appear 8 times.
+This line will appear 8 times.
+This line will appear 8 times.
+
 This line is number four.
 We have redacted these lines:
 [REDACTED]
@@ -9,4 +14,9 @@ We have redacted these lines:
 That feels better.
 
 As you can see, This
-file has been modified.
+file has been *very* modified.
+
+This line will appear 8 times.
+This line will appear 8 times.
+This line will appear 8 times.
+This line will appear 8 times.

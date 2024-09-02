@@ -7,7 +7,7 @@ const Runner = @import("Runner.zig");
 pub fn main() !void {
     switch (builtin.mode) {
         .Debug, .ReleaseSafe => {
-            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
             defer if (gpa.deinit() == .leak) @panic("LEAK!");
             const alloc = gpa.allocator();
             try run(alloc);

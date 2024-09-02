@@ -16,7 +16,8 @@ pub fn init(alloc: Allocator, file_name: ?[]const u8) !Self {
     var self: Self = .empty;
     if (file_name) |name| {
         // in the case of loading an empty file, create a new file
-        const file = try std.fs.cwd().createFile(name, .{ .read = true, .truncate = false });
+        const open_or_create = .{ .read = true, .truncate = false };
+        const file = try std.fs.cwd().createFile(name, open_or_create);
         defer file.close();
         const reader = file.reader();
         // read the file in line-by-line, making sure to capture any last newline
@@ -77,7 +78,7 @@ pub fn save(self: Self, file_name: []const u8, range: Range) !void {
 
 pub fn replace(self: *Self, alloc: Allocator, lines: Lines) !void {
     const range = lines.range();
-    if (range.end >= self.length()) return error.OutOfBounds;
+    if (range.end > self.length()) return error.OutOfBounds;
     const new_lines = try lines.dupe(alloc);
     defer alloc.free(new_lines.text); // just free the array (we own the lines)
     const old_lines = self.lines.items[range.start..range.end];
