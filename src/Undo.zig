@@ -155,7 +155,7 @@ test "undo and redo" {
         &.{.{ .insert = .init(&.{"This is Line 2"}, 1) }},
         &.{.{ .insert = .init(&.{"This is Line 1"}, 0) }},
         &.{.{ .replace = .init(&.{"Goodbye, World!"}, 1) }},
-        &.{.{ .delete = .initLen(1, 1) }},
+        &.{.{ .delete = .init(1, 1) }},
         &.{.{ .insert = .init(&.{
             "This is Line 3",
             "This is Line 4",
@@ -165,7 +165,7 @@ test "undo and redo" {
             "Line 3 is redacted",
             "Line 4 is redacted",
         }, 2) }},
-        &.{.{ .delete = .initLen(1, 3) }},
+        &.{.{ .delete = .init(1, 3) }},
         &.{.{ .resize = 5 }},
     };
 

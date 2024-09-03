@@ -10,6 +10,7 @@ const Undo = @import("Undo.zig");
 const Change = Undo.Change;
 const Range = @import("Range.zig");
 const Lines = @import("Lines.zig");
+const misc = @import("misc.zig");
 
 const Editor = struct {
     attempted_exit: bool,
@@ -177,12 +178,12 @@ fn handlingLoop(self: *Self) !void {
 
 // sets the current line
 fn lineCommand(self: *Self, range_str: []const u8) !void {
-    const default: Range = .initLen(self.state.line, 1);
+    const default: Range = .init(self.state.line, 1);
     const line_count = self.state.buffer.length();
     const range: Range = try .parse(range_str, line_count, default);
-    if (range.length() > 1) {
+    if (range.length > 1) {
         return error.Malformed;
-    } else if (range.length() == 1) {
+    } else if (range.length == 1) {
         self.state.line = range.start;
     }
 }
@@ -205,7 +206,7 @@ fn printCommand(
             break :blk 16;
         }
     };
-    const default: Range = .initLen(self.state.line, @intCast(line_count));
+    const default: Range = .init(self.state.line, @intCast(line_count));
     const length = self.state.buffer.length();
     const range: Range = try .parse(range_str, length, default);
     if (self.state.buffer.get(range)) |lines| {
@@ -232,7 +233,7 @@ fn writeCommand(
         else => data_str,
     };
     const len = self.state.buffer.length();
-    const entire_file: Range = .initLen(0, len);
+    const entire_file: Range = .init(0, len);
     const range: Range = try .parse(range_str, len, entire_file);
     try self.state.buffer.save(file_name, range);
     self.state.dirty = false;
@@ -246,7 +247,7 @@ fn insertCommand(
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
-    const default: Range = .initLen(self.state.line, 1);
+    const default: Range = .init(self.state.line, 1);
     // allow us to insert right after the buffer - using $
     const insert_len = self.state.buffer.length() + 1;
     const range: Range = try .parse(range_str, insert_len, default);
@@ -254,7 +255,7 @@ fn insertCommand(
         // don't write out-of-bounds, resize to write at wherever
         try step.append(self.alloc, .{ .resize = range.start });
     }
-    if (range.length() != 1) return error.Malformed;
+    if (range.length != 1) return error.Malformed;
     switch (data_str.len) {
         0 => {
             self.state.line = range.start;
@@ -281,7 +282,7 @@ fn insertCommand(
             const owned = try lines.dupe(self.alloc);
             errdefer owned.deinit(self.alloc);
             try step.append(self.alloc, .{ .insert = owned });
-            self.state.line = range.end;
+            self.state.line = range.end();
         },
     }
 }
@@ -295,7 +296,7 @@ fn deleteCommand(
     data_str: []const u8,
 ) !void {
     if (data_str.len > 0) return error.Malformed;
-    const default: Range = .initLen(self.state.line, 1);
+    const default: Range = .init(self.state.line, 1);
     const length = self.state.buffer.length();
     const range: Range = try .parse(range_str, length, default);
     self.state.line = range.start;
@@ -317,7 +318,7 @@ fn moveCommand(
         // don't move out-of-bounds, resize to move wherever
         try step.append(self.alloc, .{ .resize = move_dest });
     }
-    const default: Range = .initLen(self.state.line, 1);
+    const default: Range = .init(self.state.line, 1);
     const range: Range = try .parse(range_str, line_count, default);
     const move_text = self.state.buffer.get(range) orelse return error.OutOfBounds;
     var owned = try move_text.dupe(self.alloc);
@@ -347,7 +348,7 @@ fn copyCommand(
         // don't copy out-of-bounds, resize to copy wherever
         try step.append(self.alloc, .{ .resize = copy_dest });
     }
-    const default: Range = .initLen(self.state.line, 1);
+    const default: Range = .init(self.state.line, 1);
     const range: Range = try .parse(range_str, line_count, default);
     const copy_text = self.state.buffer.get(range) orelse return error.OutOfBounds;
     var owned = try copy_text.dupe(self.alloc);
@@ -363,13 +364,13 @@ fn replaceCommand(
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
-    const default: Range = .initLen(self.state.line, 1);
+    const default: Range = .init(self.state.line, 1);
     const length = self.state.buffer.length();
     const range: Range = try .parse(range_str, length, default);
     self.state.line = range.start;
     switch (data_str.len) {
         // finite mode is escaped only by replacing the entire range
-        0 => replace_finite: for (range.start..range.end) |line| {
+        0 => replace_finite: for (range.start..range.end()) |line| {
             // get user input
             try self.printLineNumber(self.state.line);
             const user_input = try self.input();
@@ -384,7 +385,7 @@ fn replaceCommand(
             if (user_input.reached_eof) break :replace_finite;
         },
         // replace the entire range with data_str
-        else => for (range.start..range.end) |line| {
+        else => for (range.start..range.end()) |line| {
             const lines: Lines = .init((&data_str)[0..1], line);
             const owned = try lines.dupe(self.alloc);
             errdefer owned.deinit(self.alloc);
@@ -400,7 +401,7 @@ fn undoCommand(
     data_str: []const u8,
 ) !void {
     if (range_str.len > 0) return error.Malformed;
-    const times = if (data_str.len > 0) try Range.parseUsize(data_str) else 1;
+    const times = if (data_str.len > 0) try misc.parseUsize(data_str) else 1;
     for (0..times) |_| {
         try self.state.undo.undo(self.alloc, &self.state.buffer);
     }
@@ -413,7 +414,7 @@ fn redoCommand(
     data_str: []const u8,
 ) !void {
     if (range_str.len > 0) return error.Malformed;
-    const times = if (data_str.len > 0) try Range.parseUsize(data_str) else 1;
+    const times = if (data_str.len > 0) try misc.parseUsize(data_str) else 1;
     for (0..times) |_| {
         try self.state.undo.redo(self.alloc, &self.state.buffer);
     }

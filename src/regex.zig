@@ -1,6 +1,13 @@
 const std = @import("std");
+const misc = @import("misc.zig");
+const Range = @import("Range.zig");
 
-// TODO: make this pile of junk return ranges, and not just a bool
+// TODO:
+// (stuff) matches the regexp stuff
+// [atom_a-atom_b...] matches any atom inclusive in atom_a-atom_b, or ...
+// [atom_aatom_batom_c...] matches any atom_a, atom_b, atom_c...
+
+// already has:
 
 // c matches any literal character c
 // . matches any single character
@@ -9,146 +16,313 @@ const std = @import("std");
 // * matches zero or more occurrences of the previous character
 // + matches one or more occurrences of the previous character
 // ? matches zero or one occurences of the previous character
-// \ escapes the following symbol, which is matched literally
+// \ matches the following symbol literally, except:
+// \t matches tab
+// \c matches control codes
+// \p matches printable characters
+// \s matches whitespace
+// \l matches lowercase
+// \u matches uppercase
+// \a matches alphabetic
+// \n matches alphanumeric
+// \w matches words (alphanumeric + '_')
+// \h matches hex digits
+// \d matches decimal digits
 
 // deals with ^ and initial position of the match in text
-pub fn match(regexp: []const u8, text: []const u8) bool {
+
+pub fn match(regexp: []const u8, text: []const u8) !?Range {
     if (regexp.len == 0) {
-        return true;
+        return .{ .start = 0, .length = 0 };
     } else if (regexp[0] == '^') {
-        return matchHere(regexp[1..], text);
+        if (try matchHere(regexp[1..], text)) |length| {
+            return .{ .start = 0, .length = length };
+        }
     } else for (0..text.len + 1) |index| {
-        if (matchHere(regexp, text[index..])) {
-            return true;
+        if (try matchHere(regexp, text[index..])) |length| {
+            return .{ .start = index, .length = length };
         }
     }
-    return false;
+    return null;
 }
 
-// main recursive nest - ordered priority matching at the current location
-// deals with escaping, switching between iterators (*, +, ?), matching the end
-// and matching literal symbols
-fn matchHere(regexp: []const u8, text: []const u8) bool {
-    if (regexp.len == 0) {
-        return true;
-    }
-    if (regexp[0] == '\\') {
-        if (text.len > 0 and regexp.len > 1) {
-            if (text[0] == regexp[1]) {
-                return matchHere(regexp[2..], text[1..]);
+const AtomError = error{ NoAtom, InvalidHexit };
+
+const Atom = union(enum) {
+    literal: u8, // \xdd, or otherwise
+    any, // .
+    tab, // \t
+    control, // \c
+    print, // \p
+    white, // \s
+    lower, // \l
+    upper, // \u
+    alpha, // \a
+    alphanum, // \n
+    word, // \w
+    hex, // \h
+    digit, // \d
+
+    pub fn init(regexp: []const u8) AtomError!struct { Atom, usize } {
+        if (regexp.len > 0) {
+            if (regexp[0] == '.') return .{ .any, 1 };
+            if (regexp[0] == '\\' and regexp.len > 1) {
+                switch (regexp[1]) {
+                    't' => return .{ .tab, 2 },
+                    'a' => return .{ .alpha, 2 },
+                    'n' => return .{ .alphanum, 2 },
+                    'w' => return .{ .word, 2 },
+                    'c' => return .{ .control, 2 },
+                    'd' => return .{ .digit, 2 },
+                    'h' => return .{ .hex, 2 },
+                    'l' => return .{ .lower, 2 },
+                    'p' => return .{ .print, 2 },
+                    'u' => return .{ .upper, 2 },
+                    's' => return .{ .white, 2 },
+                    'x' => if (regexp.len > 3) {
+                        const low = try misc.parseHexit(regexp[3]);
+                        const high = try misc.parseHexit(regexp[2]);
+                        const atom = .{ .literal = high * 16 + low };
+                        return .{ atom, 4 };
+                    },
+                    else => {
+                        const atom = .{ .literal = regexp[1] };
+                        return .{ atom, 2 };
+                    },
+                }
             }
+            const atom = .{ .literal = regexp[0] };
+            return .{ atom, 1 };
         }
-        return false;
+        return error.NoAtom;
     }
-    if (regexp.len > 1) {
-        if (regexp[1] == '*') {
-            return matchStar(regexp[2..], text, regexp[0]);
+    pub fn match(atom: Atom, c: u8) bool {
+        return switch (atom) {
+            .literal => |lit| c == lit,
+            .any => true,
+            .tab => c == '\t',
+            .control => switch (c) {
+                0x00...0x1F, 0x7F => true,
+                else => false,
+            },
+            .print => switch (c) {
+                0x20...0x7E => true,
+                else => false,
+            },
+            .white => switch (c) {
+                ' ', '\t', '\n', '\r', 0x0B, 0x0C => true,
+                else => false,
+            },
+            .lower => switch (c) {
+                'a'...'z' => true,
+                else => false,
+            },
+            .upper => switch (c) {
+                'A'...'Z' => true,
+                else => false,
+            },
+            .alpha => switch (c) {
+                'A'...'Z', 'a'...'z' => true,
+                else => false,
+            },
+            .alphanum => switch (c) {
+                '0'...'9', 'A'...'Z', 'a'...'z' => true,
+                else => false,
+            },
+            .word => switch (c) {
+                '0'...'9', 'A'...'Z', 'a'...'z', '_' => true,
+                else => false,
+            },
+            .hex => switch (c) {
+                '0'...'9', 'A'...'F', 'a'...'f' => true,
+                else => false,
+            },
+            .digit => switch (c) {
+                '0'...'9' => true,
+                else => false,
+            },
+        };
+    }
+};
+
+// main recursive nest
+fn matchHere(regexp: []const u8, text: []const u8) AtomError!?usize {
+    if (regexp.len == 0) return 0;
+    // from now on regexp.len >= 1
+    const atom, const atom_len = try Atom.init(regexp);
+    if (regexp[atom_len..].len > 0) {
+        switch (regexp[atom_len]) {
+            '?' => return try matchQuestionMark(regexp[atom_len + 1 ..], text, atom),
+            '+' => return try matchPlus(regexp[atom_len + 1 ..], text, atom),
+            '*' => return try matchStar(regexp[atom_len + 1 ..], text, atom),
+            else => {},
+            //if (regexp[1] == '{') {
+            //    const rep_a_len = misc.parseNumStrLen(regexp[2..]);
+            //    const rep_a_str = regexp[2..][0..rep_a_len];
+            //    const rep_a = try misc.parseUsize(rep_a_str);
+            //},
         }
-        if (regexp[1] == '+') {
-            return matchPlus(regexp[2..], text, regexp[0]);
-        }
-        if (regexp[1] == '?') {
-            return matchQuestionMark(regexp[2..], text, regexp[0]);
+    } else if (regexp[0] == '$') { // regexp.len == 1
+        if (text.len == 0) {
+            return 0;
+        } else {
+            return null;
         }
     }
-    if (text.len == 0) {
-        return regexp.len == 1 and regexp[0] == '$';
-    }
-    return matchOnce(regexp[1..], text, regexp[0]);
+    return try matchOnce(regexp[atom_len..], text, atom);
 }
 
 // deals with every possible "zero or more" match, then passes back to
 // matchHere to continue matching the rest of the regexp
-fn matchStar(regexp: []const u8, text: []const u8, c: u8) bool {
+fn matchStar(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
     const limit = blk: {
-        if (c != '.') for (0..text.len) |index| {
-            if (text[index] != c) {
+        for (0..text.len) |index| {
+            if (!atom.match(text[index])) {
                 break :blk index;
             }
-        };
+        }
         break :blk text.len;
     };
     for (0..limit + 1) |rev_idx| {
         const index = limit - rev_idx;
-        if (matchHere(regexp, text[index..])) {
-            return true;
+        if (try matchHere(regexp, text[index..])) |length| {
+            return index + length;
         }
     }
-    return false;
+    return null;
 }
 
 // ensures that at least one match was made, then passes to matchStar
 // to continue to match "zero or more" additional, then back to the regexp
-fn matchPlus(regexp: []const u8, text: []const u8, c: u8) bool {
-    if (text.len == 0) return false;
-    if (c != '.' and text[0] != c) return false;
-    return matchStar(regexp, text[1..], c);
+fn matchPlus(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
+    if (text.len == 0) return null;
+    if (!atom.match(text[0])) return null;
+    if (try matchStar(regexp, text[1..], atom)) |length| {
+        return length + 1;
+    }
+    return null;
 }
 
 // ensures that one or none matches were made, then passes
 // back to matchStar to continuematching the rest of the regexp
-fn matchQuestionMark(regexp: []const u8, text: []const u8, c: u8) bool {
-    if (matchOnce(regexp, text, c)) {
-        return true;
+fn matchQuestionMark(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
+    if (try matchOnce(regexp, text, atom)) |length| {
+        return length;
     }
-    return matchHere(regexp, text);
+    return try matchHere(regexp, text);
 }
 
 // matches a literal exactly once, passes back to matchHere to
 // continue matching the rest of the regexp
-fn matchOnce(regexp: []const u8, text: []const u8, c: u8) bool {
-    if (text.len > 0) {
-        if (c == '.' or c == text[0]) {
-            return matchHere(regexp, text[1..]);
+fn matchOnce(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
+    if (text.len > 0 and atom.match(text[0])) {
+        if (try matchHere(regexp, text[1..])) |length| {
+            return length + 1;
         }
     }
-    return false;
+    return null;
 }
 
 const expectEqual = std.testing.expectEqual;
+const expectError = std.testing.expectError;
 
-test match {
-    try expectEqual(true, match("", ""));
-    try expectEqual(true, match(".*", ""));
-    try expectEqual(true, match("a?b", "b"));
-    try expectEqual(true, match("\\.", "."));
-    try expectEqual(true, match("a?b", "ab"));
-    try expectEqual(true, match("a?bc", "bc"));
-    try expectEqual(true, match("a+b", "aab"));
-    try expectEqual(true, match("a?bc", "abc"));
-    try expectEqual(true, match("a*b", "xyzb"));
-    try expectEqual(true, match("a+b", "aaab"));
-    try expectEqual(true, match("1\\+1", "1+1"));
-    try expectEqual(true, match("a*b", "xaaab"));
-    try expectEqual(true, match("1+2", "11112"));
-    try expectEqual(true, match("^abc$", "abc"));
-    try expectEqual(true, match("a\\.b", "a.b"));
-    try expectEqual(true, match("a+bc", "aaabc"));
-    try expectEqual(true, match("a*b", "xcaacb"));
-    try expectEqual(true, match("", "not empty"));
-    try expectEqual(true, match("a.c", "xa1c yz"));
-    try expectEqual(true, match("^abc", "abcxyz"));
-    try expectEqual(true, match("xyz$", "abcxyz"));
-    try expectEqual(true, match(".*", "anything"));
-    try expectEqual(true, match("abc", "xyzabcxyz"));
-    try expectEqual(true, match("ab.*cd", "abxyzcd"));
-    try expectEqual(true, match("^a.*z$", "alphabetz"));
-    try expectEqual(true, match("hello\\ world", "hello world"));
+test "regex implementation" {
+    // Literal Character Matching
+    try expectEqual(Range.init(0, 1), try match("a", "a"));
+    try expectEqual(null, try match("b", "a"));
 
-    try expectEqual(false, match("a+b", "b"));
-    try expectEqual(false, match("\\.", "a"));
-    try expectEqual(false, match("a\\.b", "ab"));
-    try expectEqual(false, match("1\\+1", "11"));
-    try expectEqual(false, match("^a?b", "aab"));
-    try expectEqual(false, match("a+bc", "aab"));
-    try expectEqual(false, match("^abc$", "abcz"));
-    try expectEqual(false, match("ca?bc", "caabc"));
-    try expectEqual(false, match("xyz$", "xyzabc"));
-    try expectEqual(false, match("abc", "xyzabxyz"));
-    try expectEqual(false, match("a.c", "xa  c yz"));
-    try expectEqual(false, match("^abc", "zabcxyz"));
-    try expectEqual(false, match("^abc$", "abczabc"));
-    try expectEqual(false, match("^a.*z$", "alphabet"));
-    try expectEqual(false, match("ab.*cd", "xyzabxyzd"));
-    try expectEqual(false, match("hello\\ world", "helloworld"));
+    // Dot (.) Matching Any Single Character
+    try expectEqual(Range.init(0, 1), try match(".", "a"));
+    try expectEqual(Range.init(0, 1), try match(".", "1"));
+    try expectEqual(null, try match(".", ""));
+
+    // Caret (^) Matching the Beginning of the Input String
+    try expectEqual(Range.init(0, 1), try match("^a", "abc"));
+    try expectEqual(null, try match("^b", "abc"));
+
+    // Dollar Sign ($) Matching the End of the Input String
+    try expectEqual(Range.init(2, 1), try match("a$", "cba"));
+    try expectEqual(null, try match("b$", "cba"));
+
+    // Star (*) Matching Zero or More Occurrences of the Previous Character
+    try expectEqual(Range.init(0, 3), try match("a*", "aaa"));
+    try expectEqual(Range.init(0, 0), try match("a*", "b"));
+    try expectEqual(Range.init(0, 0), try match("a*", ""));
+
+    // Plus (+) Matching One or More Occurrences of the Previous Character
+    try expectEqual(Range.init(0, 3), try match("a+", "aaa"));
+    try expectEqual(null, try match("a+", "b"));
+    try expectEqual(null, try match("a+", ""));
+
+    // Question Mark (?) Matching Zero or One Occurrences of the Previous Character
+    try expectEqual(Range.init(0, 1), try match("a?", "a"));
+    try expectEqual(Range.init(0, 0), try match("a?", "b"));
+    try expectEqual(Range.init(0, 0), try match("a?", ""));
+
+    // Escape Sequences
+    try expectEqual(Range.init(0, 1), try match("\\\\", "\\"));
+    try expectEqual(Range.init(0, 1), try match("\\t", "\t"));
+    try expectEqual(null, try match("\\t", "a"));
+
+    // Control Character (\c)
+    try expectEqual(Range.init(0, 1), try match("\\c", "\x1F"));
+    try expectEqual(null, try match("\\c", "A"));
+
+    // Whitespace (\s)
+    try expectEqual(Range.init(0, 1), try match("\\s", " "));
+    try expectEqual(Range.init(0, 1), try match("\\s", "\t"));
+    try expectEqual(null, try match("\\s", "A"));
+
+    // Digit (\d)
+    try expectEqual(Range.init(0, 1), try match("\\d", "1"));
+    try expectEqual(null, try match("\\d", "a"));
+
+    // Word (\w)
+    try expectEqual(Range.init(0, 1), try match("\\w", "A"));
+    try expectEqual(Range.init(0, 1), try match("\\w", "1"));
+    try expectEqual(Range.init(0, 1), try match("\\w", "_"));
+    try expectEqual(null, try match("\\w", "$"));
+
+    // Hexadecimal Matching
+    try expectEqual(Range.init(0, 1), try match("\\x41", "A"));
+    try expectEqual(null, try match("\\x41", "B"));
+    try expectError(error.InvalidHexit, match("\\xG1", "A")); // Invalid Hex
+
+    // Complex Patterns
+    try expectEqual(Range.init(0, 5), try match("a*b", "aaaab"));
+    try expectEqual(Range.init(0, 1), try match("a*b", "b"));
+    try expectEqual(Range.init(0, 8), try match(".*", "anything"));
+    try expectEqual(Range.init(0, 0), try match(".*", ""));
+
+    // Start and End Anchors
+    try expectEqual(Range.init(0, 1), try match("^a$", "a"));
+    try expectEqual(null, try match("^a$", "b"));
+    try expectEqual(Range.init(0, 3), try match("^abc$", "abc"));
+    try expectEqual(null, try match("^abc$", "abcd"));
+    try expectEqual(null, try match("^abc$", "zabc"));
+
+    // Escaped Characters in Complex Patterns
+    try expectEqual(Range.init(0, 3), try match("\\.\\*\\?", ".*?"));
+    try expectEqual(Range.init(0, 4), try match("\\^\\$\\+\\*", "^$+*"));
+
+    // Escaped Metacharacters
+    try expectEqual(Range.init(0, 1), try match("\\^", "^"));
+    try expectEqual(Range.init(0, 1), try match("\\$", "$"));
+    try expectEqual(Range.init(0, 1), try match("\\*", "*"));
+    try expectEqual(Range.init(0, 1), try match("\\+", "+"));
+    try expectEqual(Range.init(0, 1), try match("\\?", "?"));
+
+    // Matching Empty String
+    try expectEqual(Range.init(0, 0), try match("", "anything"));
+    try expectEqual(Range.init(0, 0), try match("^$", ""));
+
+    // Test with Multiple Matches
+    try expectEqual(Range.init(0, 2), try match("a+b", "ab"));
+    try expectEqual(Range.init(0, 4), try match("a+b", "aaab"));
+    try expectEqual(null, try match("a+b", "b"));
+
+    // Boundary Conditions
+    try expectEqual(Range.init(0, 3), try match("^abc$", "abc"));
+    try expectEqual(null, try match("^abc$", "ab"));
+    try expectEqual(null, try match("^abc$", "abcd"));
 }

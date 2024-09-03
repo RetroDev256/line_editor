@@ -51,7 +51,7 @@ pub fn deinit(self: *Self, alloc: Allocator) void {
 // constant operations
 
 pub fn get(self: Self, range: Range) ?Lines {
-    const end = @min(range.end, self.length());
+    const end = @min(range.end(), self.length());
     if (range.start >= end) return null;
     const text = self.lines.items[range.start..end];
     return .init(text, range.start);
@@ -78,10 +78,10 @@ pub fn save(self: Self, file_name: []const u8, range: Range) !void {
 
 pub fn replace(self: *Self, alloc: Allocator, lines: Lines) !void {
     const range = lines.range();
-    if (range.end > self.length()) return error.OutOfBounds;
+    if (range.end() > self.length()) return error.OutOfBounds;
     const new_lines = try lines.dupe(alloc);
     defer alloc.free(new_lines.text); // just free the array (we own the lines)
-    const old_lines = self.lines.items[range.start..range.end];
+    const old_lines = self.lines.items[range.start..][0..range.length];
     for (old_lines, new_lines.text) |*old, new| {
         alloc.free(old.*);
         old.* = new;
@@ -113,7 +113,7 @@ pub fn resize(self: *Self, alloc: Allocator, len: usize) !void {
         try self.lines.appendNTimes(alloc, &.{}, added_amount);
     } else if (len < self.length()) {
         const start = self.length() - len;
-        const range: Range = .initLen(start, len);
+        const range: Range = .init(start, len);
         if (self.get(range)) |to_remove| {
             for (to_remove.text) |line| {
                 alloc.free(line);
