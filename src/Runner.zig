@@ -421,7 +421,6 @@ fn redoCommand(
 
 // testing
 
-// bugs found with this: 2
 test "basically the entire thing" {
     const alloc = std.testing.allocator;
     const expected = @embedFile("testing/expected");

@@ -13,8 +13,7 @@ pub fn parse(str: []const u8, line_count: usize, default: Self) !Self {
         const start = try parseLine(str[0..sep], line_count) orelse 0;
         const end_exclusive = try parseRangeExclusiveEnd(str[sep + 1 ..], line_count);
         // allow ranges of zero length, but not of negative length
-        // the user may want a zero-length range to effect the editor state
-        // but not anything in the buffer.
+        // the user may want a zero-length range for some reason, who knows?
         if (start > end_exclusive) return error.InvalidRange;
         return .{ .start = start, .end = end_exclusive };
     } else if (try parseLine(str, line_count)) |line| {
@@ -101,7 +100,6 @@ pub fn parseUsize(num: []const u8) !usize {
 const expectEqual = std.testing.expectEqual;
 const expectError = std.testing.expectError;
 
-// bugs found with this: 1
 test parse {
     const default = initLen(64, 16);
     try expectEqual(initLen(6, 0), parse("7,6", 20, default));
