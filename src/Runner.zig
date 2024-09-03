@@ -12,21 +12,35 @@ const Range = @import("Range.zig");
 const Lines = @import("Lines.zig");
 
 const Editor = struct {
+    attempted_exit: bool,
+    dirty: bool,
     line: usize,
     file_out: ?[]const u8,
+    buffer: LineBuffer,
+    undo: Undo,
 
-    pub fn init(file_out: ?[]const u8) Editor {
-        return .{ .line = 0, .file_out = file_out };
+    pub fn init(alloc: Allocator, file_in: ?[]const u8, file_out: ?[]const u8) !Editor {
+        return .{
+            .attempted_exit = false,
+            .dirty = false,
+            .line = 0,
+            .file_out = file_out,
+            .buffer = try .init(alloc, file_in),
+            .undo = .empty,
+        };
+    }
+
+    pub fn deinit(self: *Editor, alloc: Allocator) void {
+        self.buffer.deinit(alloc);
+        self.undo.deinit(alloc);
+        self.* = undefined;
     }
 };
 
 alloc: Allocator,
 cmd_in: File,
-buffer: LineBuffer,
-
 cmd_out: ?File,
 state: Editor,
-undo: Undo = .empty,
 
 pub fn init(
     alloc: Allocator,
@@ -35,18 +49,12 @@ pub fn init(
     file_in: ?[]const u8,
     file_out: ?[]const u8,
 ) !@This() {
-    return .{
-        .alloc = alloc,
-        .cmd_in = cmd_in,
-        .cmd_out = cmd_out,
-        .buffer = try .init(alloc, file_in),
-        .state = .init(file_out),
-    };
+    const state: Editor = try .init(alloc, file_in, file_out);
+    return .{ .alloc = alloc, .cmd_in = cmd_in, .cmd_out = cmd_out, .state = state };
 }
 
 pub fn deinit(self: *@This()) void {
-    self.buffer.deinit(self.alloc);
-    self.undo.deinit(self.alloc);
+    self.state.deinit(self.alloc);
     self.* = undefined;
 }
 
@@ -54,8 +62,6 @@ pub fn deinit(self: *@This()) void {
 pub fn run(self: *Self) !void {
     while (true) {
         if (self.handlingLoop()) |_| break else |err| {
-            // if we can't display the error, just hard error
-            if (self.cmd_out == null) return err;
             const err_string = switch (err) {
                 error.Malformed => "Malformed command",
                 error.InvalidRange => "Invalid range",
@@ -66,6 +72,7 @@ pub fn run(self: *Self) !void {
                 error.NoMoreUndoSteps => "No more undo steps",
                 error.NoMoreRedoSteps => "No more redo steps",
                 error.NumberTooLarge => "Number too large",
+                error.ExitWithoutSave => "File may not be saved",
                 else => return err,
             };
             try self.print("Error: {s}\n", .{err_string});
@@ -128,33 +135,41 @@ fn handlingLoop(self: *Self) !void {
         const range_end = Range.parseableEnd(cmd);
         const range_str = cmd[0..range_end];
         const cmd_str = cmd[range_end..];
-        switch (cmd_str.len) {
-            0 => try self.lineCommand(range_str),
-            else => {
-                const data_str = cmd_str[1..];
-                switch (cmd_str[0]) {
-                    // commands which don't modify the buffer
-                    'p' => try self.printCommand(range_str, data_str), // print
-                    'w' => try self.writeCommand(range_str, data_str), // write
-                    // commands which modify the buffer
-                    '.' => try self.insertCommand(&step, range_str, data_str), // insert
-                    'd' => try self.deleteCommand(&step, range_str, data_str), // delete
-                    's' => @panic("Todo"), // substitute
-                    'm' => try self.moveCommand(&step, range_str, data_str), // move
-                    'c' => try self.copyCommand(&step, range_str, data_str), // copy
-                    'x' => try self.replaceCommand(&step, range_str, data_str), // change
-                    // undo/redo (will probably modify the buffer)
-                    'u' => try self.undoCommand(range_str, data_str), // undo
-                    'r' => try self.redoCommand(range_str, data_str), // redo
-                    // commands which don't read the buffer
-                    'q' => break :loop, // quit
-                    '?' => @panic("Todo"), // help
-                    else => return error.Malformed,
-                }
-            },
+        if (cmd_str.len == 1 and cmd_str[0] == 'q') { // quit
+            if (self.state.dirty and !self.state.attempted_exit) {
+                self.state.attempted_exit = true;
+                return error.ExitWithoutSave;
+            } else break :loop;
+        } else {
+            self.state.attempted_exit = false;
+            switch (cmd_str.len) {
+                0 => try self.lineCommand(range_str),
+                else => {
+                    const data_str = cmd_str[1..];
+                    switch (cmd_str[0]) {
+                        // commands which don't modify the buffer
+                        'p' => try self.printCommand(range_str, data_str), // print
+                        'w' => try self.writeCommand(range_str, data_str), // write
+                        // commands which modify the buffer
+                        '.' => try self.insertCommand(&step, range_str, data_str), // insert
+                        'd' => try self.deleteCommand(&step, range_str, data_str), // delete
+                        's' => @panic("Todo"), // substitute
+                        'm' => try self.moveCommand(&step, range_str, data_str), // move
+                        'c' => try self.copyCommand(&step, range_str, data_str), // copy
+                        'x' => try self.replaceCommand(&step, range_str, data_str), // change
+                        // undo/redo (will probably modify the buffer)
+                        'u' => try self.undoCommand(range_str, data_str), // undo
+                        'r' => try self.redoCommand(range_str, data_str), // redo
+                        // commands which don't read the buffer
+                        '?' => @panic("Todo"), // help
+                        else => return error.Malformed,
+                    }
+                },
+            }
         }
         // apply the change to the buffer, make an undo step
-        try self.undo.apply(self.alloc, step.items, &self.buffer);
+        if (step.items.len > 0) self.state.dirty = true;
+        try self.state.undo.apply(self.alloc, step.items, &self.state.buffer);
         // we have reached EOF of the command input, exit
         if (user_input.reached_eof) break :loop;
     }
@@ -163,7 +178,7 @@ fn handlingLoop(self: *Self) !void {
 // sets the current line
 fn lineCommand(self: *Self, range_str: []const u8) !void {
     const default: Range = .initLen(self.state.line, 1);
-    const line_count = self.buffer.length();
+    const line_count = self.state.buffer.length();
     const range: Range = try .parse(range_str, line_count, default);
     if (range.length() > 1) {
         return error.Malformed;
@@ -191,8 +206,9 @@ fn printCommand(
         }
     };
     const default: Range = .initLen(self.state.line, @intCast(line_count));
-    const range: Range = try .parse(range_str, self.buffer.length(), default);
-    if (self.buffer.get(range)) |lines| {
+    const length = self.state.buffer.length();
+    const range: Range = try .parse(range_str, length, default);
+    if (self.state.buffer.get(range)) |lines| {
         self.state.line += lines.text.len;
         for (lines.text, range.start..) |text, line| {
             try self.printLineNumber(line);
@@ -215,10 +231,11 @@ fn writeCommand(
         } else return error.FilenameNotSet,
         else => data_str,
     };
-    const len = self.buffer.length();
-    const default: Range = .initLen(0, len);
-    const range: Range = try .parse(range_str, len, default);
-    try self.buffer.save(file_name, range);
+    const len = self.state.buffer.length();
+    const entire_file: Range = .initLen(0, len);
+    const range: Range = try .parse(range_str, len, entire_file);
+    try self.state.buffer.save(file_name, range);
+    self.state.dirty = false;
 }
 
 // without command data, drops into insert mode at the specified line
@@ -231,9 +248,9 @@ fn insertCommand(
 ) !void {
     const default: Range = .initLen(self.state.line, 1);
     // allow us to insert right after the buffer - using $
-    const insert_len = self.buffer.length() + 1;
+    const insert_len = self.state.buffer.length() + 1;
     const range: Range = try .parse(range_str, insert_len, default);
-    if (range.start > self.buffer.length()) {
+    if (range.start > self.state.buffer.length()) {
         // don't write out-of-bounds, resize to write at wherever
         try step.append(self.alloc, .{ .resize = range.start });
     }
@@ -279,7 +296,8 @@ fn deleteCommand(
 ) !void {
     if (data_str.len > 0) return error.Malformed;
     const default: Range = .initLen(self.state.line, 1);
-    const range: Range = try .parse(range_str, self.buffer.length(), default);
+    const length = self.state.buffer.length();
+    const range: Range = try .parse(range_str, length, default);
     self.state.line = range.start;
     try step.append(self.alloc, .{ .delete = range });
 }
@@ -291,17 +309,17 @@ fn moveCommand(
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
-    const line_count = self.buffer.length();
+    const line_count = self.state.buffer.length();
     // plus one, because we can move to right after the other text (using $)
     const move_dest_maybe = try Range.parseLine(data_str, line_count + 1);
     const move_dest = move_dest_maybe orelse return error.Malformed;
-    if (move_dest > self.buffer.length()) {
+    if (move_dest > line_count) {
         // don't move out-of-bounds, resize to move wherever
         try step.append(self.alloc, .{ .resize = move_dest });
     }
     const default: Range = .initLen(self.state.line, 1);
     const range: Range = try .parse(range_str, line_count, default);
-    const move_text = self.buffer.get(range) orelse return error.OutOfBounds;
+    const move_text = self.state.buffer.get(range) orelse return error.OutOfBounds;
     var owned = try move_text.dupe(self.alloc);
     errdefer owned.deinit(self.alloc);
     try step.append(self.alloc, .{ .delete = move_text.range() });
@@ -321,17 +339,17 @@ fn copyCommand(
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
-    const line_count = self.buffer.length();
+    const line_count = self.state.buffer.length();
     // plus one, because we can copy to right after the other text (using $)
     const copy_dest_maybe = try Range.parseLine(data_str, line_count + 1);
     const copy_dest = copy_dest_maybe orelse return error.Malformed;
-    if (copy_dest > self.buffer.length()) {
+    if (copy_dest > line_count) {
         // don't copy out-of-bounds, resize to copy wherever
         try step.append(self.alloc, .{ .resize = copy_dest });
     }
     const default: Range = .initLen(self.state.line, 1);
     const range: Range = try .parse(range_str, line_count, default);
-    const copy_text = self.buffer.get(range) orelse return error.OutOfBounds;
+    const copy_text = self.state.buffer.get(range) orelse return error.OutOfBounds;
     var owned = try copy_text.dupe(self.alloc);
     owned.start = copy_dest;
     errdefer owned.deinit(self.alloc);
@@ -346,7 +364,8 @@ fn replaceCommand(
     data_str: []const u8,
 ) !void {
     const default: Range = .initLen(self.state.line, 1);
-    const range: Range = try .parse(range_str, self.buffer.length(), default);
+    const length = self.state.buffer.length();
+    const range: Range = try .parse(range_str, length, default);
     self.state.line = range.start;
     switch (data_str.len) {
         // finite mode is escaped only by replacing the entire range
@@ -383,7 +402,7 @@ fn undoCommand(
     if (range_str.len > 0) return error.Malformed;
     const times = if (data_str.len > 0) try Range.parseUsize(data_str) else 1;
     for (0..times) |_| {
-        try self.undo.undo(self.alloc, &self.buffer);
+        try self.state.undo.undo(self.alloc, &self.state.buffer);
     }
 }
 
@@ -396,7 +415,7 @@ fn redoCommand(
     if (range_str.len > 0) return error.Malformed;
     const times = if (data_str.len > 0) try Range.parseUsize(data_str) else 1;
     for (0..times) |_| {
-        try self.undo.redo(self.alloc, &self.buffer);
+        try self.state.undo.redo(self.alloc, &self.state.buffer);
     }
 }
 
@@ -412,7 +431,7 @@ test "basically the entire thing" {
     var runner = try init(alloc, script, null, initial, null);
     defer runner.deinit();
     try runner.run();
-    try LineBuffer.expectEqual(&runner.buffer, expected);
+    try LineBuffer.expectEqual(&runner.state.buffer, expected);
     // when we get a clean build, delete our helpful "actual" output
     try std.fs.cwd().deleteFile("src/testing/actual");
 }
