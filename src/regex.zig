@@ -311,4 +311,7 @@ test "regex implementation" {
     try expectEqual(Range.init(0, 3), try match("^abc$", "abc"));
     try expectEqual(null, try match("^abc$", "ab"));
     try expectEqual(null, try match("^abc$", "abcd"));
+
+    // Combining stuff (advanced trash)
+    try expectEqual(Range.init(0, 33), try match("^.*sus.*$", "This trash contains some sus text"));
 }
