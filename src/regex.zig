@@ -10,6 +10,7 @@ const Range = @import("Range.zig");
 // This regex matching function has the following features:
 
 // c matches any literal character c
+// \xAA matches character 0xAA
 // . matches any single character
 // ^ matches the beginning of the input string
 // $ matches the end of the input string

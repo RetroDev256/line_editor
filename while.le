@@ -1,0 +1,52 @@
+# le script to replace all keywords with 'while'
+
+s for / while 
+s if / while 
+s switch / while 
+s break / while 
+s const / while 
+s continue / while 
+s defer / while 
+s else / while 
+s extern / while 
+s fn / while 
+s return / while 
+s struct / while 
+s union / while 
+s var / while 
+
+# now for no space on the left
+
+sfor / while 
+sif / while 
+sswitch / while 
+sbreak / while 
+sconst / while 
+scontinue / while 
+sdefer / while 
+selse / while 
+sextern / while 
+sfn / while 
+sreturn / while 
+sstruct / while 
+sunion / while 
+svar / while 
+
+# now for no space on the right
+
+s for/ while 
+s if/ while 
+s switch/ while 
+s break/ while 
+s const/ while 
+s continue/ while 
+s defer/ while 
+s else/ while 
+s extern/ while 
+s fn/ while 
+s return/ while 
+s struct/ while 
+s union/ while 
+s var/ while 
+
+w

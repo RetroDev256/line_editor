@@ -338,7 +338,7 @@ fn substituteCommand(
                 try fresh_text.appendSlice(self.alloc, text[start..][0..match.start]);
                 // append the replacement text instead of the match
                 try fresh_text.appendSlice(self.alloc, rep_strs.replacement);
-                start = @max(start + 1, match.end());
+                start += @max(1, match.end());
             }
             // append the rest
             try fresh_text.appendSlice(self.alloc, text[@min(text.len, start)..]);
