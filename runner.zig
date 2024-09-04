@@ -26,7 +26,7 @@ const Editor = struct {
             .attempted_exit = false,
             .dirty = false,
             .line = 0,
-            .file_out = file_out orelse file_in,
+            .file_out = file_out,
             .buffer = try .init(alloc, file_in),
             .undo = .empty,
         };
