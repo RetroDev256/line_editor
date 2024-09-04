@@ -155,15 +155,13 @@ fn handlingLoop(self: *Self) !void {
                         // commands which modify the buffer
                         '.' => try self.insertCommand(&step, range_str, data_str), // insert
                         'd' => try self.deleteCommand(&step, range_str, data_str), // delete
-                        's' => @panic("Todo"), // substitute
+                        's' => try self.substituteCommand(&step, range_str, data_str), // substitute
                         'm' => try self.moveCommand(&step, range_str, data_str), // move
                         'c' => try self.copyCommand(&step, range_str, data_str), // copy
                         'x' => try self.replaceCommand(&step, range_str, data_str), // change
                         // undo/redo (will probably modify the buffer)
                         'u' => try self.undoCommand(range_str, data_str), // undo
                         'r' => try self.redoCommand(range_str, data_str), // redo
-                        // commands which don't read the buffer
-                        '?' => @panic("Todo"), // help
                         else => return error.Malformed,
                     }
                 },
@@ -309,6 +307,50 @@ fn deleteCommand(
             const line: Range = .init(lines.start + rev_offset, 1);
             if (try regex.match(data_str, text)) |_| {
                 try step.append(self.alloc, .{ .delete = line });
+            }
+        }
+    }
+}
+
+// substitute text with other text - range defaults to entire file
+// data_str is [regexp]/[replacement], escape with \
+fn substituteCommand(
+    self: *Self,
+    step: *List(Change),
+    range_str: []const u8,
+    data_str: []const u8,
+) !void {
+    const length = self.state.buffer.length();
+    const default: Range = .init(0, length);
+    const range: Range = try .parse(range_str, self.state.line, length, default);
+    const rep_strs = misc.parseReplaceStrings(data_str) orelse return error.Malformed;
+    if (self.state.buffer.get(range)) |lines| {
+        for (lines.text, lines.start..) |text, line| {
+            var fresh_text: List(u8) = .empty;
+            defer fresh_text.deinit(self.alloc);
+
+            // substitutes all rep_strs.regexp matches in
+            // each line in range with rep_strs.replacement
+            var start: usize = 0;
+            loop: while (start < text.len) {
+                const match = regex.match(rep_strs.regexp, text[start..]) catch {
+                    return error.Malformed;
+                } orelse break :loop;
+                // append the part it skipped over
+                try fresh_text.appendSlice(self.alloc, text[start..][0..match.start]);
+                // append the replacement text instead of the match
+                try fresh_text.appendSlice(self.alloc, rep_strs.replacement);
+                start = @max(start + 1, match.end());
+            }
+            // append the rest
+            try fresh_text.appendSlice(self.alloc, text[@min(text.len, start)..]);
+
+            // if there has been no change don't replace the line
+            if (start > 0) {
+                const replace: Lines = Lines.init((&fresh_text.items)[0..1], line);
+                const owned = try replace.dupe(self.alloc);
+                errdefer owned.deinit(self.alloc);
+                try step.append(self.alloc, .{ .replace = owned });
             }
         }
     }

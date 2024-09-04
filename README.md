@@ -6,7 +6,6 @@ The windows builds are significantly more than the other builds due to this:
 https://github.com/ziglang/zig/issues/18849
 
 TODO:
-- add basic regex (^ and $ and . and ? and * matching) for Substitute.zig
 - raw mode parsing (so we can use our arrow keys in the input)
 - options to toggle aspects of printing:
     - toggle printing line numbers

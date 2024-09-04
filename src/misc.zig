@@ -45,6 +45,25 @@ pub fn parseHexit(c: u8) !u8 {
     };
 }
 
+const ReplaceStrings = struct {
+    regexp: []const u8,
+    replacement: []const u8,
+};
+
+pub fn parseReplaceStrings(both: []const u8) ?ReplaceStrings {
+    var escaped: bool = false;
+    for (both, 0..) |byte, index| {
+        if (byte == '/' and !escaped) {
+            return .{
+                .regexp = both[0..index],
+                .replacement = both[index + 1 ..],
+            };
+        }
+        escaped = byte == '\\';
+    }
+    return null;
+}
+
 // tests
 
 const expectEqual = std.testing.expectEqual;
