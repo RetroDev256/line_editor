@@ -11,6 +11,7 @@ const Change = Undo.Change;
 const Range = @import("Range.zig");
 const Lines = @import("Lines.zig");
 const misc = @import("misc.zig");
+const regex = @import("regex.zig");
 
 const Editor = struct {
     attempted_exit: bool,
@@ -189,13 +190,11 @@ fn lineCommand(self: *Self, range_str: []const u8) !void {
 }
 
 // prints 16 lines at current line by default - updates current line to after last printed
-// planned: regex after the print command will print lines in the range that match
 fn printCommand(
     self: *Self,
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
-    if (data_str.len > 0) return error.Malformed;
     // by default, fill the screen with lines we print
     const line_count = blk: {
         const cmd_out_file = self.cmd_out orelse return; // can't print otherwise
@@ -212,8 +211,11 @@ fn printCommand(
     if (self.state.buffer.get(range)) |lines| {
         self.state.line += lines.text.len;
         for (lines.text, range.start..) |text, line| {
-            try self.printLineNumber(line);
-            try self.print("{s}\n", .{text});
+            // allow the user to add a regexp afterward to print out matching lines
+            if (try regex.match(data_str, text)) |_| {
+                try self.printLineNumber(line);
+                try self.print("{s}\n", .{text});
+            }
         }
     }
 }
@@ -288,19 +290,28 @@ fn insertCommand(
 }
 
 // deletes lines specified in the range. Sets current line to first index deleted
-// planned: regex after the delete command will delete lines in the range that match
 fn deleteCommand(
     self: *Self,
     step: *List(Change),
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
-    if (data_str.len > 0) return error.Malformed;
     const default: Range = .init(self.state.line, 1);
     const length = self.state.buffer.length();
     const range: Range = try .parse(range_str, self.state.line, length, default);
     self.state.line = range.start;
-    try step.append(self.alloc, .{ .delete = range });
+    if (self.state.buffer.get(range)) |lines| {
+        // allow the user to add regexp afterward to delete matching lines
+        for (0..lines.text.len) |offset| {
+            // delete in reverse order so our indexes won't be messed up
+            const rev_offset = lines.text.len - (offset + 1);
+            const text = lines.text[rev_offset];
+            const line: Range = .init(lines.start + rev_offset, 1);
+            if (try regex.match(data_str, text)) |_| {
+                try step.append(self.alloc, .{ .delete = line });
+            }
+        }
+    }
 }
 
 // move one range of text to another location (defined by data_str)

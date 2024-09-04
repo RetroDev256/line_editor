@@ -120,7 +120,7 @@ fn applyInner(
         const rev_idx = rev_step.len - (line + 1);
         rev_step[rev_idx].deinit(alloc);
     };
-    while (i < step.len) : (i += 1) {
+    while (i < rev_step.len) : (i += 1) {
         const rev_idx = rev_step.len - (i + 1);
         rev_step[rev_idx] = try step[i].apply(alloc, buffer);
     }

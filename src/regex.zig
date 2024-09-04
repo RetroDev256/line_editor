@@ -7,7 +7,7 @@ const Range = @import("Range.zig");
 // [atom_a-atom_b...] matches any atom inclusive in atom_a-atom_b, or ...
 // [atom_aatom_batom_c...] matches any atom_a, atom_b, atom_c...
 
-// already has:
+// This regex matching function has the following features:
 
 // c matches any literal character c
 // . matches any single character
@@ -30,7 +30,6 @@ const Range = @import("Range.zig");
 // \d matches decimal digits
 
 // deals with ^ and initial position of the match in text
-
 pub fn match(regexp: []const u8, text: []const u8) !?Range {
     if (regexp.len == 0) {
         return .{ .start = 0, .length = 0 };
@@ -156,6 +155,7 @@ fn matchHere(regexp: []const u8, text: []const u8) AtomError!?usize {
             '+' => return try matchMany(regexp[atom_len + 1 ..], text, atom, 1, null),
             '*' => return try matchMany(regexp[atom_len + 1 ..], text, atom, 0, null),
             else => {},
+            // TODO
             //if (regexp[1] == '{') {
             //    const rep_a_len = misc.parseNumStrLen(regexp[2..]);
             //    const rep_a_str = regexp[2..][0..rep_a_len];
