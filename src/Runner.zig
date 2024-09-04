@@ -64,6 +64,8 @@ pub fn deinit(self: *@This()) void {
 pub fn run(self: *Self) !void {
     while (true) {
         if (self.handlingLoop()) |_| break else |err| {
+            // Scripts should never error.
+            if (self.cmd_out == null) return err;
             const err_string = switch (err) {
                 error.Malformed => "Malformed command",
                 error.InvalidRange => "Invalid range",
@@ -335,13 +337,13 @@ fn substituteCommand(
                 const match_attempt = regex.match(regexp, fresh_text.items);
                 const maybe_match = match_attempt catch return error.Malformed;
                 const match = maybe_match orelse break :loop;
-                const start, const len = .{ match.start, match.length };
                 if (maybe_old_match) |old_match| {
-                    if (old_match.start == start and old_match.length == len) {
+                    if (match.end() <= old_match.end()) {
                         return error.LoopingSubstitution;
                     }
                 }
-                maybe_old_match = match;
+                maybe_old_match = .init(match.start, replacement.len);
+                const start, const len = .{ match.start, match.length };
                 try fresh_text.replaceRange(self.alloc, start, len, replacement);
             }
 
