@@ -152,9 +152,9 @@ fn matchHere(regexp: []const u8, text: []const u8) AtomError!?usize {
     const atom, const atom_len = try Atom.init(regexp);
     if (regexp[atom_len..].len > 0) {
         switch (regexp[atom_len]) {
-            '?' => return try matchQuestionMark(regexp[atom_len + 1 ..], text, atom),
-            '+' => return try matchPlus(regexp[atom_len + 1 ..], text, atom),
-            '*' => return try matchStar(regexp[atom_len + 1 ..], text, atom),
+            '?' => return try matchMany(regexp[atom_len + 1 ..], text, atom, 0, 1),
+            '+' => return try matchMany(regexp[atom_len + 1 ..], text, atom, 1, null),
+            '*' => return try matchMany(regexp[atom_len + 1 ..], text, atom, 0, null),
             else => {},
             //if (regexp[1] == '{') {
             //    const rep_a_len = misc.parseNumStrLen(regexp[2..]);
@@ -169,55 +169,40 @@ fn matchHere(regexp: []const u8, text: []const u8) AtomError!?usize {
             return null;
         }
     }
-    return try matchOnce(regexp[atom_len..], text, atom);
+    return try matchMany(regexp[atom_len..], text, atom, 1, 1);
 }
 
-// deals with every possible "zero or more" match, then passes back to
-// matchHere to continue matching the rest of the regexp
-fn matchStar(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
+fn matchMany(regexp: []const u8, text: []const u8, atom: Atom, min: usize, maybe_max: ?usize) !?usize {
+    // not possible to match the minimum number of times
+    if (min > text.len) return null;
+    // make sure we match the minimum number of times
+    for (0..min) |offset| {
+        if (!atom.match(text[offset])) {
+            return null;
+        }
+    }
+    // greedy-seek maximum possible matches
+    const var_text = text[min..];
+    const true_limit = blk: {
+        if (maybe_max) |max| {
+            break :blk @min(var_text.len, max - min);
+        } else {
+            break :blk var_text.len;
+        }
+    };
     const limit = blk: {
-        for (0..text.len) |index| {
-            if (!atom.match(text[index])) {
+        for (0..true_limit) |index| {
+            if (!atom.match(var_text[index])) {
                 break :blk index;
             }
         }
-        break :blk text.len;
+        break :blk true_limit;
     };
+    // back-track attempt matching
     for (0..limit + 1) |rev_idx| {
         const index = limit - rev_idx;
-        if (try matchHere(regexp, text[index..])) |length| {
-            return index + length;
-        }
-    }
-    return null;
-}
-
-// ensures that at least one match was made, then passes to matchStar
-// to continue to match "zero or more" additional, then back to the regexp
-fn matchPlus(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
-    if (text.len == 0) return null;
-    if (!atom.match(text[0])) return null;
-    if (try matchStar(regexp, text[1..], atom)) |length| {
-        return length + 1;
-    }
-    return null;
-}
-
-// ensures that one or none matches were made, then passes
-// back to matchStar to continuematching the rest of the regexp
-fn matchQuestionMark(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
-    if (try matchOnce(regexp, text, atom)) |length| {
-        return length;
-    }
-    return try matchHere(regexp, text);
-}
-
-// matches a literal exactly once, passes back to matchHere to
-// continue matching the rest of the regexp
-fn matchOnce(regexp: []const u8, text: []const u8, atom: Atom) !?usize {
-    if (text.len > 0 and atom.match(text[0])) {
-        if (try matchHere(regexp, text[1..])) |length| {
-            return length + 1;
+        if (try matchHere(regexp, var_text[index..])) |length| {
+            return min + index + length;
         }
     }
     return null;
@@ -258,6 +243,7 @@ test "regex implementation" {
     try expectEqual(Range.init(0, 1), try match("a?", "a"));
     try expectEqual(Range.init(0, 0), try match("a?", "b"));
     try expectEqual(Range.init(0, 0), try match("a?", ""));
+    try expectEqual(null, try match("dc?a", "dba"));
 
     // Escape Sequences
     try expectEqual(Range.init(0, 1), try match("\\\\", "\\"));
