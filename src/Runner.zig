@@ -106,15 +106,12 @@ fn input(self: Self) !InputResult {
     const cmd_w = cmd.writer(self.alloc);
     // read user result, break on "enter"
     const result = self.cmd_in.reader().streamUntilDelimiter(cmd_w, '\n', null);
-    result catch |err| switch (err) {
-        error.EndOfStream => {
-            const text = try cmd.toOwnedSlice(self.alloc);
-            return .{ .reached_eof = true, .text = text };
-        },
+    const text = try cmd.toOwnedSlice(self.alloc);
+    const eof = if (result) |_| false else |err| switch (err) {
+        error.EndOfStream => true,
         else => return err,
     };
-    const text = try cmd.toOwnedSlice(self.alloc);
-    return .{ .reached_eof = false, .text = text };
+    return .{ .reached_eof = eof, .text = text };
 }
 
 // command mode dispatch
@@ -162,6 +159,7 @@ fn handlingLoop(self: *Self) !void {
                         // undo/redo (will probably modify the buffer)
                         'u' => try self.undoCommand(range_str, data_str), // undo
                         'r' => try self.redoCommand(range_str, data_str), // redo
+                        '#' => if (range_str.len > 0) return error.Malformed, // comments
                         else => return error.Malformed,
                     }
                 },
