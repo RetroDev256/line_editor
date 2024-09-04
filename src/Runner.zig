@@ -75,6 +75,7 @@ pub fn run(self: *Self) !void {
                 error.NoMoreRedoSteps => "No more redo steps",
                 error.NumberTooLarge => "Number too large",
                 error.ExitWithoutSave => "File may not be saved",
+                error.LoopingSubstitution => "Substitution infinitely loops",
                 else => return err,
             };
             try self.print("Error: {s}\n", .{err_string});
@@ -321,30 +322,31 @@ fn substituteCommand(
     const length = self.state.buffer.length();
     const default: Range = .init(0, length);
     const range: Range = try .parse(range_str, self.state.line, length, default);
-    const rep_strs = misc.parseReplaceStrings(data_str) orelse return error.Malformed;
+    const parsed_rs = misc.parseReplaceStrings(data_str) orelse return error.Malformed;
+    const regexp, const replacement = .{ parsed_rs.regexp, parsed_rs.replacement };
     if (self.state.buffer.get(range)) |lines| {
         for (lines.text, lines.start..) |text, line| {
             var fresh_text: List(u8) = .empty;
             defer fresh_text.deinit(self.alloc);
+            try fresh_text.appendSlice(self.alloc, text);
 
-            // substitutes all rep_strs.regexp matches in
-            // each line in range with rep_strs.replacement
-            var start: usize = 0;
-            loop: while (start < text.len) {
-                const match = regex.match(rep_strs.regexp, text[start..]) catch {
-                    return error.Malformed;
-                } orelse break :loop;
-                // append the part it skipped over
-                try fresh_text.appendSlice(self.alloc, text[start..][0..match.start]);
-                // append the replacement text instead of the match
-                try fresh_text.appendSlice(self.alloc, rep_strs.replacement);
-                start += @max(1, match.end());
+            var maybe_old_match: ?Range = null;
+            loop: while (true) {
+                const match_attempt = regex.match(regexp, fresh_text.items);
+                const maybe_match = match_attempt catch return error.Malformed;
+                const match = maybe_match orelse break :loop;
+                const start, const len = .{ match.start, match.length };
+                if (maybe_old_match) |old_match| {
+                    if (old_match.start == start and old_match.length == len) {
+                        return error.LoopingSubstitution;
+                    }
+                }
+                maybe_old_match = match;
+                try fresh_text.replaceRange(self.alloc, start, len, replacement);
             }
-            // append the rest
-            try fresh_text.appendSlice(self.alloc, text[@min(text.len, start)..]);
 
             // if there has been no change don't replace the line
-            if (start > 0) {
+            if (maybe_old_match != null) {
                 const replace: Lines = Lines.init((&fresh_text.items)[0..1], line);
                 const owned = try replace.dupe(self.alloc);
                 errdefer owned.deinit(self.alloc);
