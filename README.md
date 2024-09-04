@@ -2,7 +2,7 @@
 
 Just a simple line editor.
 
-The windows builds are significantly more than the other builds due to this:
+The windows builds are significantly larger than the other builds due to this:
 https://github.com/ziglang/zig/issues/18849
 
 TODO:
