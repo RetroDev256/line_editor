@@ -39,5 +39,4 @@ fn run(alloc: Allocator) !void {
 
 test {
     _ = &std.testing.refAllDeclsRecursive(@This());
-    _ = @import("regex.zig");
 }
