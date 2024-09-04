@@ -180,7 +180,7 @@ fn handlingLoop(self: *Self) !void {
 fn lineCommand(self: *Self, range_str: []const u8) !void {
     const default: Range = .init(self.state.line, 1);
     const line_count = self.state.buffer.length();
-    const range: Range = try .parse(range_str, line_count, default);
+    const range: Range = try .parse(range_str, self.state.line, line_count, default);
     if (range.length > 1) {
         return error.Malformed;
     } else if (range.length == 1) {
@@ -208,7 +208,7 @@ fn printCommand(
     };
     const default: Range = .init(self.state.line, @intCast(line_count));
     const length = self.state.buffer.length();
-    const range: Range = try .parse(range_str, length, default);
+    const range: Range = try .parse(range_str, self.state.line, length, default);
     if (self.state.buffer.get(range)) |lines| {
         self.state.line += lines.text.len;
         for (lines.text, range.start..) |text, line| {
@@ -234,7 +234,7 @@ fn writeCommand(
     };
     const len = self.state.buffer.length();
     const entire_file: Range = .init(0, len);
-    const range: Range = try .parse(range_str, len, entire_file);
+    const range: Range = try .parse(range_str, self.state.line, len, entire_file);
     try self.state.buffer.save(file_name, range);
     self.state.dirty = false;
 }
@@ -250,7 +250,7 @@ fn insertCommand(
     const default: Range = .init(self.state.line, 1);
     // allow us to insert right after the buffer - using $
     const insert_len = self.state.buffer.length() + 1;
-    const range: Range = try .parse(range_str, insert_len, default);
+    const range: Range = try .parse(range_str, self.state.line, insert_len, default);
     if (range.start > self.state.buffer.length()) {
         // don't write out-of-bounds, resize to write at wherever
         try step.append(self.alloc, .{ .resize = range.start });
@@ -298,7 +298,7 @@ fn deleteCommand(
     if (data_str.len > 0) return error.Malformed;
     const default: Range = .init(self.state.line, 1);
     const length = self.state.buffer.length();
-    const range: Range = try .parse(range_str, length, default);
+    const range: Range = try .parse(range_str, self.state.line, length, default);
     self.state.line = range.start;
     try step.append(self.alloc, .{ .delete = range });
 }
@@ -312,14 +312,14 @@ fn moveCommand(
 ) !void {
     const line_count = self.state.buffer.length();
     // plus one, because we can move to right after the other text (using $)
-    const move_dest_maybe = try Range.parseLine(data_str, line_count + 1);
+    const move_dest_maybe = try Range.parseLine(data_str, self.state.line, line_count + 1);
     const move_dest = move_dest_maybe orelse return error.Malformed;
     if (move_dest > line_count) {
         // don't move out-of-bounds, resize to move wherever
         try step.append(self.alloc, .{ .resize = move_dest });
     }
     const default: Range = .init(self.state.line, 1);
-    const range: Range = try .parse(range_str, line_count, default);
+    const range: Range = try .parse(range_str, self.state.line, line_count, default);
     const move_text = self.state.buffer.get(range) orelse return error.OutOfBounds;
     var owned = try move_text.dupe(self.alloc);
     errdefer owned.deinit(self.alloc);
@@ -342,14 +342,14 @@ fn copyCommand(
 ) !void {
     const line_count = self.state.buffer.length();
     // plus one, because we can copy to right after the other text (using $)
-    const copy_dest_maybe = try Range.parseLine(data_str, line_count + 1);
+    const copy_dest_maybe = try Range.parseLine(data_str, self.state.line, line_count + 1);
     const copy_dest = copy_dest_maybe orelse return error.Malformed;
     if (copy_dest > line_count) {
         // don't copy out-of-bounds, resize to copy wherever
         try step.append(self.alloc, .{ .resize = copy_dest });
     }
     const default: Range = .init(self.state.line, 1);
-    const range: Range = try .parse(range_str, line_count, default);
+    const range: Range = try .parse(range_str, self.state.line, line_count, default);
     const copy_text = self.state.buffer.get(range) orelse return error.OutOfBounds;
     var owned = try copy_text.dupe(self.alloc);
     owned.start = copy_dest;
@@ -366,7 +366,7 @@ fn replaceCommand(
 ) !void {
     const default: Range = .init(self.state.line, 1);
     const length = self.state.buffer.length();
-    const range: Range = try .parse(range_str, length, default);
+    const range: Range = try .parse(range_str, self.state.line, length, default);
     self.state.line = range.start;
     switch (data_str.len) {
         // finite mode is escaped only by replacing the entire range
