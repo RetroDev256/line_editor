@@ -12,13 +12,15 @@ pub fn build(b: *std.Build) void {
     }
 }
 
-const target_strs: []const []const u8 = &.{
-    "aarch64_be-linux",  "aarch64-linux",   "aarch64-windows", "aarch64-macos",
-    "armeb-linux",       "arm-linux",       "x86-linux",       "x86-windows",
-    "mips64el-linux",    "mips64-linux",    "mipsel-linux",    "mips-linux",
-    "powerpc64le-linux", "powerpc64-linux", "powerpc-linux",   "riscv32-linux",
-    "riscv64-linux",     "wasm32-wasi",     "x86_64-linux",    "x86_64-windows",
-    "x86_64-macos",
+const target_strs = .{
+    "powerpc64le-linux", "aarch64-linux",   "aarch64-macos",   "mips-linux",
+    "thumbeb-linux",     "powerpcle-linux", "aarch64-windows", "wasm32-wasi",
+    "mips64-linux",      "wasm64-wasi",     "riscv32-linux",   "aarch64_be-linux",
+    "x86-linux",         "mips64el-linux",  "riscv64-linux",   "x86-windows",
+    "arm-linux",         "mipsel-linux",    "s390x-linux",     "x86_64-linux",
+    "armeb-linux",       "x86_64-macos",    "powerpc-linux",   "x86_64-windows",
+    "hexagon-linux",     "powerpc64-linux", "thumb-linux",     "loongarch64-linux",
+    "aarch64-linux",     "thumb-windows",
 };
 
 fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) void {
@@ -39,7 +41,7 @@ fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) voi
 
         // exe steps
         const exe = b.addExecutable(.{
-            .name = "le_" ++ target_str,
+            .name = "" ++ target_str,
             .root_module = root_mod,
         });
         exe.link_function_sections = true;
