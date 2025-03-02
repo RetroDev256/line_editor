@@ -1,12 +1,10 @@
-const Self = @This();
-
 const std = @import("std");
 const builtin = @import("builtin");
 
 width: u16,
 height: u16,
 
-pub fn size(file: std.fs.File) !?Self {
+pub fn size(file: std.fs.File) !?@This() {
     switch (builtin.os.tag) {
         .linux, .macos => {
             var win_size: std.posix.winsize = undefined;
@@ -16,7 +14,7 @@ pub fn size(file: std.fs.File) !?Self {
                 @intFromPtr(&win_size),
             );
             switch (std.posix.errno(ioctl_result)) {
-                .SUCCESS => return Self{
+                .SUCCESS => return @This(){
                     .width = win_size.col,
                     .height = win_size.row,
                 },

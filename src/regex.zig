@@ -3,6 +3,10 @@ const misc = @import("misc.zig");
 const Range = @import("Range.zig");
 
 // TODO:
+// have a look at https://github.com/PCRE2Project/pcre2
+// look into porting it?
+
+// TODO:
 // (stuff) matches the regexp stuff
 // [atom_a-atom_b...] matches any atom inclusive in atom_a-atom_b, or ...
 // [atom_aatom_batom_c...] matches any atom_a, atom_b, atom_c...
@@ -82,17 +86,17 @@ const Atom = union(enum) {
                     'x' => if (regexp.len > 3) {
                         const low = try misc.parseHexit(regexp[3]);
                         const high = try misc.parseHexit(regexp[2]);
-                        const atom = .{ .literal = high * 16 + low };
-                        return .{ atom, 4 };
+                        const atom: Atom = .{ .literal = high * 16 + low };
+                        return struct { Atom, usize }{ atom, 4 };
                     },
                     else => {
-                        const atom = .{ .literal = regexp[1] };
-                        return .{ atom, 2 };
+                        const atom: Atom = .{ .literal = regexp[1] };
+                        return struct { Atom, usize }{ atom, 2 };
                     },
                 }
             }
-            const atom = .{ .literal = regexp[0] };
-            return .{ atom, 1 };
+            const atom: Atom = .{ .literal = regexp[0] };
+            return struct { Atom, usize }{ atom, 1 };
         }
         return error.NoAtom;
     }

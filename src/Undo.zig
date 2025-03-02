@@ -85,7 +85,7 @@ pub fn apply(self: *Self, alloc: Allocator, step: []const Change, buffer: *LineB
 
 // undo one step
 pub fn undo(self: *Self, alloc: Allocator, buffer: *LineBuffer) !void {
-    if (self.undos.popOrNull()) |step| {
+    if (self.undos.pop()) |step| {
         defer freeChangeList(alloc, step);
         try applyInner(alloc, &self.redos, step, buffer);
     } else {
@@ -95,7 +95,7 @@ pub fn undo(self: *Self, alloc: Allocator, buffer: *LineBuffer) !void {
 
 // redo one step
 pub fn redo(self: *Self, alloc: Allocator, buffer: *LineBuffer) !void {
-    if (self.redos.popOrNull()) |step| {
+    if (self.redos.pop()) |step| {
         defer freeChangeList(alloc, step);
         try applyInner(alloc, &self.undos, step, buffer);
     } else {

@@ -16,8 +16,7 @@ pub fn init(alloc: Allocator, file_name: ?[]const u8) !Self {
     var self: Self = .empty;
     if (file_name) |name| {
         // in the case of loading an empty file, create a new file
-        const open_or_create = .{ .read = true, .truncate = false };
-        const file = try std.fs.cwd().createFile(name, open_or_create);
+        const file = try std.fs.cwd().createFile(name, .{ .read = true, .truncate = false });
         defer file.close();
         const reader = file.reader();
         // read the file in line-by-line, making sure to capture any last newline
