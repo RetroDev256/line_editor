@@ -1,145 +1,144 @@
-const Self = @This();
-
 const std = @import("std");
-const List = std.ArrayListUnmanaged;
+const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
 const Range = @import("Range.zig");
-const Lines = @import("Lines.zig");
 
-lines: List([]const u8),
+// "lines" index into "pool",
+// "pool" is just concatenated strings
+lines: ArrayListUnmanaged(Range),
+pool: ArrayListUnmanaged(u8),
 
-pub const empty: Self = .{ .lines = .empty };
+pub const empty: @This() = .{
+    .lines = .empty,
+    .pool = .empty,
+};
 
-// init/deinit
+pub fn init(gpa: Allocator, file_name: []const u8) !@This() {
+    var self: @This() = .empty;
+    errdefer self.deinit(gpa);
 
-pub fn init(alloc: Allocator, file_name: ?[]const u8) !Self {
-    var self: Self = .empty;
-    if (file_name) |name| {
-        // in the case of loading an empty file, create a new file
-        const file = try std.fs.cwd().createFile(name, .{ .read = true, .truncate = false });
-        defer file.close();
-        const reader = file.reader();
-        // read the file in line-by-line, making sure to capture any last newline
-        var line_text: List(u8) = .empty;
-        defer line_text.deinit(alloc);
-        const writer = line_text.writer(alloc);
-        while (true) {
-            // re-use the allocated memory for each consecutive line
-            defer line_text.clearRetainingCapacity();
-            const result = reader.streamUntilDelimiter(writer, '\n', null);
-            // insert the loaded line at the end of the file
-            const text = (&line_text.items)[0..1];
-            const line: Lines = .init(text, self.length());
-            try self.insert(alloc, line);
-            // we have only finished once we have hit EOF
-            result catch |err| switch (err) {
-                error.EndOfStream => break,
-                else => return err,
-            };
+    // Create a new file if there is none, otherwise load current file
+    const file = try std.fs.cwd().createFile(file_name, .{
+        .read = true,
+        .truncate = false,
+    });
+    defer file.close();
+    const reader = file.reader();
+
+    var read_start: usize = 0;
+    read_file: while (true) {
+        // Trigger the ArrayList's superlinear growth for reading
+        // The "start + 1" will never overflow, due to "start"
+        // always being less than the superlinear growth factor
+        try self.pool.ensureTotalCapacity(gpa, read_start + 1);
+
+        // Read all that we can into the allocated memory
+        self.pool.expandToCapacity();
+        const dest_slice = self.pool.items[read_start..];
+        const bytes_read = try reader.readAll(dest_slice);
+        read_start += bytes_read;
+
+        // Check if we have finished reading; trim to fit
+        if (bytes_read != dest_slice.len) {
+            self.pool.shrinkRetainingCapacity(read_start);
+            break :read_file;
         }
     }
+
+    // TODO: check that it correctly reads in an extra line for the newline
+    var idx: usize = 0;
+    while (idx < self.pool.items.len) {
+        const start = idx;
+        scan: while (idx < self.pool.items.len) {
+            if (self.pool.items[idx] == '\n') {
+                const line: Range = .init(start, idx - start);
+                try self.lines.append(gpa, line);
+                idx += 1; // skip the '\n' for next elements
+                break :scan;
+            }
+            idx += 1;
+        }
+    }
+
     return self;
 }
 
-pub fn deinit(self: *Self, alloc: Allocator) void {
-    for (self.lines.items) |line| alloc.free(line);
-    self.lines.deinit(alloc);
+pub fn deinit(self: *@This(), gpa: Allocator) void {
+    self.lines.deinit(gpa);
+    self.pool.deinit(gpa);
     self.* = undefined;
 }
 
-// constant operations
-
-pub fn get(self: Self, range: Range) ?Lines {
-    const end = @min(range.end(), self.length());
-    if (range.start >= end) return null;
-    const text = self.lines.items[range.start..end];
-    return .init(text, range.start);
-}
-
-pub fn length(self: Self) usize {
-    return self.lines.items.len;
-}
-
-pub fn save(self: Self, file_name: []const u8, range: Range) !void {
+// Save a range of lines to a file.
+pub fn save(self: *@This(), file_name: []const u8, range: Range) !void {
     const file = try std.fs.cwd().createFile(file_name, .{});
     defer file.close();
-    if (self.get(range)) |lines| {
-        for (lines.text, lines.start..) |line, index| {
-            try file.writeAll(line);
-            if (index + 1 != self.length()) {
-                try file.writeAll("\n");
-            }
+    for (self.lines.items[range.start..range.end], 0..) |line, idx| {
+        try file.writeAll(self.pool.items[line.start..line.end]);
+        if (idx + 1 != self.lines.items.len) {
+            try file.writeAll("\n");
         }
     }
 }
 
-// editing operations
+// Insert a new line at a certain line number.
+pub fn insert(self: *@This(), gpa: Allocator, index: usize, line: []const u8) !void {
+    const old_length = self.pool.items.len;
+    try self.pool.appendSlice(gpa, line);
+    errdefer self.pool.items.len = old_length;
+    try self.lines.insert(gpa, index, .init(old_length, line.len));
+}
 
-pub fn replace(self: *Self, alloc: Allocator, lines: Lines) !void {
-    const range = lines.range();
-    if (range.end() > self.length()) return error.OutOfBounds;
-    const new_lines = try lines.dupe(alloc);
-    defer alloc.free(new_lines.text); // just free the array (we own the lines)
-    const old_lines = self.lines.items[range.start..][0..range.length];
-    for (old_lines, new_lines.text) |*old, new| {
-        alloc.free(old.*);
-        old.* = new;
+// Change the number of lines; either removing or appending blanks.
+pub fn resize(self: *@This(), gpa: Allocator, len: usize) !void {
+    if (len > self.lines) {
+        const added = len - self.lines.items.len;
+        try self.lines.appendNTimes(gpa, .init(0, 0), added);
+    } else {
+        self.removeRange(.init(self.lines.items.len, len));
     }
 }
 
-pub fn insert(self: *Self, alloc: Allocator, lines: Lines) !void {
-    if (self.length() < lines.start) return error.OutOfBounds;
-    try self.lines.ensureUnusedCapacity(alloc, lines.text.len);
-    const new_lines = try lines.dupe(alloc);
-    defer alloc.free(new_lines.text); // just free the array (we own the lines)
-    for (new_lines.text, new_lines.start..) |owned, idx| {
-        self.lines.insertAssumeCapacity(idx, owned);
+// Remove a range of lines
+pub fn removeRange(self: *@This(), range: Range) void {
+    for (range.start..range.end) |idx| {
+        // While not guarunteed, the underlying data is likely in order.
+        const rev_idx = self.lines.items.len - (idx + 1);
+        self.remove(rev_idx);
     }
 }
 
-pub fn delete(self: *Self, alloc: Allocator, range: Range) void {
-    if (self.get(range)) |lines| {
-        for (lines.text) |line| {
-            alloc.free(line);
-        }
-        self.lines.replaceRangeAssumeCapacity(lines.start, lines.text.len, &.{});
-    }
-}
-
-pub fn resize(self: *Self, alloc: Allocator, len: usize) !void {
-    if (len > self.length()) {
-        const added_amount = len - self.length();
-        try self.lines.appendNTimes(alloc, &.{}, added_amount);
-    } else if (len < self.length()) {
-        const start = self.length() - len;
-        const range: Range = .init(start, len);
-        if (self.get(range)) |to_remove| {
-            for (to_remove.text) |line| {
-                alloc.free(line);
-            }
-            self.lines.shrinkRetainingCapacity(len);
+// Remove a line
+pub fn remove(self: *@This(), index: usize) void {
+    // 1. See if we can swap the data in the pool with something closer
+    // to the pool end - if we can, it becomes the new empty index.
+    var slot = self.lines.items[index];
+    for (index..self.lines.items.len) |idx| {
+        const rev_idx = self.lines.items.len - (idx + 1);
+        const candidate = self.lines.items[rev_idx];
+        if (candidate.len() == slot.len()) {
+            @memcpy(
+                self.pool.items[slot.start..slot.end],
+                self.pool.items[candidate.start..candidate.end],
+            );
+            slot = candidate;
+            break;
         }
     }
-}
-
-// testing
-
-pub fn expectEqual(buffer: *const Self, lines: []const u8) !void {
-    if (!@import("builtin").is_test) return error.ExpectedTestBuild;
-    var buf: [256]u8 = undefined;
-    var stream_out = std.io.fixedBufferStream(&buf);
-    var stream_in = std.io.fixedBufferStream(lines);
-    const read_in = stream_in.reader();
-    const line_writer = stream_out.writer();
-    for (buffer.lines.items, 0..) |actual, line| {
-        defer stream_out.reset();
-        const stream_res = read_in.streamUntilDelimiter(line_writer, '\n', null);
-        if (line + 1 == buffer.lines.items.len) {
-            try std.testing.expectError(error.EndOfStream, stream_res);
-        } else {
-            try stream_res;
+    // 2. Take the empty index, and move all the memory to fill the gap.
+    // TODO: replace with @memmove when it is added to zig
+    const shift = slot.len();
+    const new_len = self.pool.items.len - shift;
+    const dest = self.pool.items[slot.start..new_len];
+    const source = self.pool.items[slot.end..];
+    for (dest, source) |*d, s| d.* = s;
+    // Line pointers are invalidated here, so update them.
+    for (self.lines.items) |*line| {
+        if (line.start >= slot.end) {
+            line.start -= shift;
+            line.end -= shift;
         }
-        const expected = stream_out.getWritten();
-        try std.testing.expectEqualSlices(u8, expected, actual);
     }
+    // 3. Change the size of the pool
+    self.pool.items.len = new_len;
 }

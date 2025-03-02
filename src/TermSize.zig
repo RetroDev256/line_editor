@@ -23,8 +23,7 @@ pub fn size(file: std.fs.File) !?@This() {
         },
         .windows => {
             var buf: std.os.windows.CONSOLE_SCREEN_BUFFER_INFO = undefined;
-            const buf_info_result = std.os.windows.kernel32.GetConsoleScreenBufferInfo(file.handle, &buf);
-            switch (buf_info_result) {
+            switch (std.os.windows.kernel32.GetConsoleScreenBufferInfo(file.handle, &buf)) {
                 std.os.windows.TRUE => {
                     const width = (buf.srWindow.Right + 1) - buf.srWindow.Left;
                     const height = (buf.srWindow.Bottom + 1) - buf.srWindow.Top;
