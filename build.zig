@@ -1,9 +1,11 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{});
     const share = b.option(bool, "share", "Prepare for distribution");
     const strip = b.option(bool, "strip", "Strip debug info");
+    const optimize = b.standardOptimizeOption(
+        .{ .preferred_optimize_mode = .ReleaseSmall },
+    );
 
     if (share orelse false) {
         buildAll(b, optimize, strip);
