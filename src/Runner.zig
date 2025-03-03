@@ -10,29 +10,13 @@ const LineBuffer = @import("LineBuffer.zig");
 const Range = @import("Range.zig");
 const misc = @import("misc.zig");
 
-const Editor = struct {
-    line: usize,
-    file_out: ?[]const u8,
-    buffer: LineBuffer,
-
-    pub fn init(gpa: Allocator, file_in: ?[]const u8, file_out: ?[]const u8) !Editor {
-        return .{
-            .line = 0,
-            .file_out = file_out orelse file_in,
-            .buffer = if (file_in) |name| try .init(gpa, name) else .empty,
-        };
-    }
-
-    pub fn deinit(self: *Editor, gpa: Allocator) void {
-        self.buffer.deinit(gpa);
-        self.* = undefined;
-    }
-};
-
 // TODO: change the type of cmd_in and cmd_out when writergate gets here :)
+
 cmd_in: File,
 cmd_out: ?File,
-state: Editor,
+file_out: ?[]const u8,
+line: usize,
+buffer: LineBuffer,
 
 pub fn init(
     gpa: Allocator,
@@ -44,27 +28,48 @@ pub fn init(
     return .{
         .cmd_in = cmd_in,
         .cmd_out = cmd_out,
-        .state = try .init(gpa, file_in, file_out),
+        .line = 0,
+        .file_out = file_out orelse file_in,
+        .buffer = if (file_in) |name| try .init(gpa, name) else .empty,
     };
 }
 
 pub fn deinit(self: *@This(), gpa: Allocator) void {
-    self.state.deinit(gpa);
+    self.buffer.deinit(gpa);
     self.* = undefined;
 }
 
-// helper function to print if we can
-fn print(self: @This(), comptime format: []const u8, args: anytype) !void {
+fn writeAll(self: @This(), bytes: []const u8) !void {
     if (self.cmd_out) |output| {
-        try output.writer().print(format, args);
+        try output.writeAll(bytes);
     }
 }
 
-// helper function to print a line number
-// TODO: pad the number so that it will match up with the
-// linebuffer length, instead of being fixed to 6 digits
 fn printLineNumber(self: @This(), line: usize) !void {
-    try self.print("{: >6} ", .{line + 1});
+    const max_line = std.math.maxInt(usize);
+    const buf_len = 1 + std.math.log10(max_line);
+    var buf: [buf_len]u8 = undefined;
+
+    const line_count = self.buffer.lines.items.len;
+    const width = misc.usizeFmt(line_count + 1, &buf).len;
+
+    if (line == self.line) {
+        try self.writeAll("^");
+    } else {
+        try self.writeAll(" ");
+    }
+
+    if (line_count > 0 and line == line_count - 1) {
+        const padding = width - 1;
+        for (0..padding) |_| try self.writeAll(" ");
+        try self.writeAll("$ ");
+    } else {
+        const line_str = misc.usizeFmt(line + 1, &buf);
+        const padding = width - line_str.len;
+        for (0..padding) |_| try self.writeAll(" ");
+        try self.writeAll(line_str);
+        try self.writeAll(" ");
+    }
 }
 
 const Input = struct {
@@ -96,7 +101,7 @@ fn readInput(self: @This(), gpa: Allocator) !Input {
 pub fn run(self: *@This(), gpa: Allocator) !void {
     loop: while (true) {
         // display command prompt, get input
-        try self.print("+ ", .{});
+        try self.writeAll("+ ");
         const user_input = try self.readInput(gpa);
         const cmd = user_input.text;
         defer gpa.free(cmd);
@@ -133,34 +138,35 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
 // sets the current line
 fn lineCommand(self: *@This(), range_str: []const u8) !void {
     const range, _ = try Range.parse(range_str, .{
-        .line = self.state.line,
-        .length = self.state.buffer.lines.items.len,
-        .default = .initSingle(self.state.line),
+        .line = self.line,
+        .length = self.buffer.lines.items.len,
+        .default = .initSingle(self.line),
     });
     if (range.len() != 1) return error.InvalidLineCommand;
-    self.state.line = range.start;
+    self.line = range.start;
 }
 
-// Print numbered lines - sets the current line to after the range
+// Print numbered lines
 fn printCommand(self: *@This(), range_str: []const u8) !void {
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
-        .line = self.state.line,
-        .length = self.state.buffer.lines.items.len,
-        .default = .initSingle(self.state.line),
+        .line = self.line,
+        .length = self.buffer.lines.items.len,
+        .default = .initSingle(self.line),
     });
     // Print the range
     for (range.start..range.end) |idx| {
         // TODO: bounds checking
-        if (self.state.buffer.get(idx)) |line| {
+        if (self.buffer.get(idx)) |line| {
             try self.printLineNumber(idx);
-            try self.print("{s}\n", .{line});
+            try self.writeAll(line);
+            try self.writeAll("\n");
         } else {
             break;
         }
     }
-    // Update the current state
-    self.state.line = range.end;
+    // Update the current line
+    self.line = @min(range.end, self.buffer.lines.items.len);
 }
 
 // Writes the range to the specified (or last specified) file name.
@@ -171,18 +177,18 @@ fn writeCommand(
     data_str: []const u8,
 ) !void {
     // Parse the range
-    const buffer_length = self.state.buffer.lines.items.len;
+    const buffer_length = self.buffer.lines.items.len;
     const range, _ = try Range.parse(range_str, .{
-        .line = self.state.line,
+        .line = self.line,
         .length = buffer_length,
         .default = .init(0, buffer_length),
     });
 
     const file_name = switch (data_str.len) {
-        0 => self.state.file_out orelse return error.FileNameNotSet,
+        0 => self.file_out orelse return error.FileNameNotSet,
         else => data_str,
     };
-    try self.state.buffer.save(file_name, range);
+    try self.buffer.save(file_name, range);
 }
 
 // Without command data, we are in a loop for inserting data.
@@ -197,36 +203,37 @@ fn insertCommand(
 ) !void {
     // Parse the range
     const range, const range_type = try Range.parse(range_str, .{
-        .line = self.state.line,
-        .length = self.state.buffer.lines.items.len,
-        .default = .initSingle(self.state.line),
+        .line = self.line,
+        .length = self.buffer.lines.items.len,
+        .default = .initSingle(self.line),
     });
 
     // TODO: check and handle out of bounds?
 
     if (data_str.len == 0) {
-        self.state.line = range.start;
-        insert: while (true) : (self.state.line += 1) {
+        var line: usize = range.start;
+        insert: while (true) : (line += 1) {
             // for "A,B" and "A;B" type loops, break on completion of the range
             if (range_type == .end_bound or range_type == .length_bound) {
-                if (self.state.line == range.end) break :insert;
+                if (line == range.end) break :insert;
             }
             // get user input
-            try self.printLineNumber(self.state.line);
+            try self.printLineNumber(line);
             const input = try self.readInput(gpa);
             defer gpa.free(input.text);
             // Loop escaped by inputting a single period
             if (misc.eql(".", input.text)) break :insert;
             // insert the line
-            try self.state.buffer.insert(gpa, self.state.line, input.text);
+            try self.buffer.insert(gpa, line, input.text);
             // Loop escaped if EOF is reached
             if (input.hit_eof) break :insert;
         }
+        self.line = line;
     } else {
         // one-shot mode duplicates the string line over the entire range
-        self.state.line = range.end;
+        self.line = range.end;
         for (range.start..range.end) |line| {
-            try self.state.buffer.insert(gpa, line, data_str);
+            try self.buffer.insert(gpa, line, data_str);
         }
     }
 }
@@ -236,13 +243,13 @@ fn insertCommand(
 fn deleteCommand(self: *@This(), range_str: []const u8) !void {
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
-        .line = self.state.line,
-        .length = self.state.buffer.lines.items.len,
-        .default = .initSingle(self.state.line),
+        .line = self.line,
+        .length = self.buffer.lines.items.len,
+        .default = .initSingle(self.line),
     });
 
-    self.state.line = range.start;
-    self.state.buffer.removeRange(range);
+    self.line = range.start;
+    self.buffer.removeRange(range);
 }
 
 // TODO: testing

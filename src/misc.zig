@@ -39,3 +39,17 @@ pub fn indexOf(haystack: []const u8, needle: u8) ?usize {
     }
     return null;
 }
+
+pub fn usizeFmt(val: usize, buf: []u8) []const u8 {
+    var conv: usize = val;
+    var i: usize = 0;
+    while (true) : (i += 1) {
+        const rev_idx = buf.len - (i + 1);
+        const digit: u8 = @intCast(conv % 10);
+        buf[rev_idx] = '0' + digit;
+        conv /= 10;
+        if (conv == 0) {
+            return buf[rev_idx..];
+        }
+    }
+}
