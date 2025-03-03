@@ -232,9 +232,7 @@ fn insertCommand(
     } else {
         // one-shot mode duplicates the string line over the entire range
         self.line = range.end;
-        for (range.start..range.end) |line| {
-            try self.buffer.insert(gpa, line, data_str);
-        }
+        try self.buffer.insertMany(gpa, range.start, range.len(), data_str);
     }
 }
 

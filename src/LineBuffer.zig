@@ -1,11 +1,23 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
 const Range = @import("Range.zig");
 
+const Slot = struct {
+    // [start, end)
+    start: usize,
+    end: usize,
+
+    fn init(start: usize, end: usize) Slot {
+        assert(end >= start);
+        return .{ .start = start, .end = end };
+    }
+};
+
 // "lines" index into "pool",
 // "pool" is just concatenated strings
-lines: ArrayListUnmanaged(Range),
+lines: ArrayListUnmanaged(Slot),
 pool: ArrayListUnmanaged(u8),
 
 pub const empty: @This() = .{
@@ -51,7 +63,7 @@ pub fn init(gpa: Allocator, file_name: []const u8) !@This() {
         const start = idx;
         scan: while (idx < self.pool.items.len) {
             if (self.pool.items[idx] == '\n') {
-                const line: Range = .init(start, idx - start);
+                const line: Slot = .init(start, idx - start);
                 try self.lines.append(gpa, line);
                 idx += 1; // skip the '\n' for next elements
                 break :scan;
@@ -90,11 +102,26 @@ pub fn get(self: @This(), index: usize) ?[]const u8 {
 
 // Insert a new line at a certain line number.
 pub fn insert(self: *@This(), gpa: Allocator, index: usize, line: []const u8) !void {
-    const old_length = self.pool.items.len;
+    const old_len = self.pool.items.len;
     try self.pool.appendSlice(gpa, line);
-    errdefer self.pool.items.len = old_length;
-    const slot: Range = .init(old_length, old_length + line.len);
-    try self.lines.insert(gpa, index, slot);
+    errdefer self.lines.items.len = old_len;
+    const interned: Slot = .init(old_len, old_len + line.len);
+    try self.lines.insert(gpa, index, interned);
+}
+
+// Insert multiple lines at a certain line number
+pub fn insertMany(
+    self: *@This(),
+    gpa: Allocator,
+    index: usize,
+    count: usize,
+    line: []const u8,
+) !void {
+    const old_len = self.pool.items.len;
+    try self.pool.appendSlice(gpa, line);
+    errdefer self.lines.items.len = old_len;
+    const dest = try self.lines.addManyAt(gpa, index, count);
+    @memset(dest, .init(old_len, old_len + line.len));
 }
 
 // Remove a range of lines
