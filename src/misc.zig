@@ -9,28 +9,22 @@ pub fn eql(comptime lhs: []const u8, rhs: []const u8) bool {
     if (lhs.len != rhs.len) {
         return false;
     }
+    var match: bool = true;
     for (lhs, rhs) |a, b| {
-        if (a != b) {
-            return false;
-        }
+        match = match and a == b;
     }
-    return true;
+    return match;
 }
 
-pub fn parseUsize(num: []const u8) !?usize {
-    if (num.len == 0) {
-        return null; // Nothing
-    }
+pub fn parseUsize(num: []const u8) !usize {
     var result: usize = 0;
     for (num) |byte| {
-        if (byte >= '0' or byte <= '9') {
-            return error.InvalidUsize; // Invalid bytes
-        }
+        if (!isDigit(byte)) return error.InvalidUsize;
         const digit: usize = @intCast(byte - '0');
         const mul_res = @mulWithOverflow(result, 10);
         const add_res = @addWithOverflow(mul_res[0], digit);
         if (mul_res[1] != 0 or add_res[1] != 0) {
-            return error.InvalidUsize; // Overflow
+            return error.ParseUsizeOverflow;
         }
         result = add_res[0];
     }

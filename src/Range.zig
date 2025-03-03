@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const misc = @import("misc.zig");
 const Range = @This();
 
@@ -7,71 +8,105 @@ start: usize,
 end: usize,
 
 pub fn init(start: usize, end: usize) Range {
+    assert(end >= start);
     return .{ .start = start, .end = end };
+}
+
+pub fn initSingle(index: usize) Range {
+    return .{ .start = index, .end = index + 1 };
 }
 
 pub fn len(self: Range) usize {
     return self.end - self.start;
 }
 
+// Parsing
+
 pub const ParseOptions = struct {
-    line: usize, // ^
-    last: usize, // $
-    length: usize,
+    line: usize, // ^ (set this to the current line)
+    length: usize, // $ (set this to the buffer length)
+    default: Range, // Default when nothing is recieved
 };
 
-// a = A,B
-// b = A;B
-// c = A
 pub const ParseResult = struct {
     Range,
-    enum { a, b, c },
+    enum {
+        end_bound,
+        length_bound,
+        single,
+        unspecified,
+    },
 };
 
-/// Parse type Range from a string
-/// ^ represents options.line
-/// $ represents options.last
-/// A,B represents lines [A, B]
-///     If A is not specified, A is implicitly options.line
-///     If B is not specified, B is implicitly options.last
-/// A;B represents lines [A, A + B]
-///     If A is not specified, A is implicitly options.line
-///     If B is not specified, B is implicitly options.length
-/// A represents [A, A + options.length]
-///     If A is not specified, A is implicitly options.line
+// Parse type Range from a string
 pub fn parse(input: []const u8, options: ParseOptions) !ParseResult {
-    if (misc.indexOf(input, ',')) |sep| { // a,b
-        const a = try misc.parseUsize(input[0..sep]) orelse options.line;
-        const b = try misc.parseUsize(input[sep + 1 ..]) orelse options.last;
-        return .{ .init(a, b + 1), .a };
-    } else if (misc.indexOf(input, ';')) |sep| { // a;b
-        const a = try misc.parseUsize(input[0..sep]) orelse options.line;
-        const b = try misc.parseUsize(input[sep + 1 ..]) orelse options.length;
-        return .{ .init(a, a + b), .b };
-    } else { // a
-        const a = try misc.parseUsize(input) orelse options.line;
-        return .{ .init(a, a + options.length), .c };
+    const line, const length = .{ options.line, options.length };
+    if (misc.indexOf(input, ',')) |sep| {
+        // "A,B" can both be missing, ^, $, or a one-indexed line number.
+
+        const a = try parseAtom(input[0..sep], line, length);
+        const b = try parseAtom(input[sep + 1 ..], line, length);
+
+        const start = a orelse 0;
+        const end = if (b) |idx| idx + 1 else length;
+
+        return .{ .init(start, end), .end_bound };
+    } else if (misc.indexOf(input, ';')) |sep| {
+        // A in "A;B" can be missing, ^, $, or a one-indexed line number.
+        // The B in "A;B" can be missing, or a one-indexed line number.
+
+        const b_str = input[sep + 1 ..];
+        const a = try parseAtom(input[0..sep], line, length);
+        const b = try misc.parseUsize(b_str);
+
+        const start = a orelse line;
+        const end = if (b_str.len == 0) length else start + b;
+
+        return .{ .init(start, end), .length_bound };
+    } else {
+        if (try parseAtom(input, line, length)) |a| {
+            // "A" must be ^, $, or a one-indexed line number.
+            return .{ .init(a, a + 1), .single };
+        } else {
+            // Where there is no input, the default is used.
+            return .{ options.default, .unspecified };
+        }
+    }
+}
+
+// Parse a range atom - returns null on no input.
+// Converts one-indexing input to zero-indexing.
+fn parseAtom(atom: []const u8, line: usize, length: usize) !?usize {
+    if (atom.len == 0) return null;
+
+    if (atom.len == 1) {
+        if (atom[0] == '^') return line;
+
+        if (atom[0] == '$') {
+            // '$' doesn't exist when the buffer is empty
+            if (length == 0) {
+                return error.NoBufferEnd;
+            } else {
+                return length - 1;
+            }
+        }
+    }
+
+    const input = try misc.parseUsize(atom);
+    // The user may not index by zero
+    if (input == 0) {
+        return error.ZeroIndexedInput;
+    } else {
+        return input - 1;
     }
 }
 
 // Length of a range prefixed to a string
 pub fn prefixLength(cmd: []const u8) usize {
     var idx: usize = 0;
-    idx += atomPrefixLength(cmd[idx..]);
-    if (idx > cmd.len or (cmd[idx] != ',' and cmd[idx] != ';')) return idx;
-    idx += atomPrefixLength(cmd[idx..]);
-    return idx;
-}
-
-// Length of a range atom prefixed to a string
-pub fn atomPrefixLength(cmd: []const u8) usize {
-    var idx: usize = 0;
-    switch (cmd[idx]) {
-        '^', '$' => idx += 1,
-        else => while (true) : (idx += 1) {
-            if (idx > cmd.len) return idx;
-            if (!misc.isDigit(cmd[idx])) break;
-        },
-    }
-    return idx;
+    while (idx < cmd.len) switch (cmd[idx]) {
+        '0'...'9', ',', ';', '^', '$' => idx += 1,
+        else => return idx,
+    };
+    return cmd.len;
 }

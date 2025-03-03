@@ -81,64 +81,28 @@ pub fn save(self: *@This(), file_name: []const u8, range: Range) !void {
     }
 }
 
+// Retrieve a line by line number
+pub fn get(self: @This(), index: usize) ?[]const u8 {
+    if (index >= self.lines.items.len) return null;
+    const lookup = self.lines.items[index];
+    return self.pool.items[lookup.start..lookup.end];
+}
+
 // Insert a new line at a certain line number.
 pub fn insert(self: *@This(), gpa: Allocator, index: usize, line: []const u8) !void {
     const old_length = self.pool.items.len;
     try self.pool.appendSlice(gpa, line);
     errdefer self.pool.items.len = old_length;
-    try self.lines.insert(gpa, index, .init(old_length, line.len));
-}
-
-// Change the number of lines; either removing or appending blanks.
-pub fn resize(self: *@This(), gpa: Allocator, len: usize) !void {
-    if (len > self.lines) {
-        const added = len - self.lines.items.len;
-        try self.lines.appendNTimes(gpa, .init(0, 0), added);
-    } else {
-        self.removeRange(.init(self.lines.items.len, len));
-    }
+    const slot: Range = .init(old_length, old_length + line.len);
+    try self.lines.insert(gpa, index, slot);
 }
 
 // Remove a range of lines
 pub fn removeRange(self: *@This(), range: Range) void {
-    for (range.start..range.end) |idx| {
-        // While not guarunteed, the underlying data is likely in order.
-        const rev_idx = self.lines.items.len - (idx + 1);
-        self.remove(rev_idx);
+    const source = self.lines.items[range.end..];
+    const dest = self.lines.items[range.start..];
+    for (dest[0..source.len], source) |*d, s| {
+        d.* = s;
     }
-}
-
-// Remove a line
-pub fn remove(self: *@This(), index: usize) void {
-    // 1. See if we can swap the data in the pool with something closer
-    // to the pool end - if we can, it becomes the new empty index.
-    var slot = self.lines.items[index];
-    for (index..self.lines.items.len) |idx| {
-        const rev_idx = self.lines.items.len - (idx + 1);
-        const candidate = self.lines.items[rev_idx];
-        if (candidate.len() == slot.len()) {
-            @memcpy(
-                self.pool.items[slot.start..slot.end],
-                self.pool.items[candidate.start..candidate.end],
-            );
-            slot = candidate;
-            break;
-        }
-    }
-    // 2. Take the empty index, and move all the memory to fill the gap.
-    // TODO: replace with @memmove when it is added to zig
-    const shift = slot.len();
-    const new_len = self.pool.items.len - shift;
-    const dest = self.pool.items[slot.start..new_len];
-    const source = self.pool.items[slot.end..];
-    for (dest, source) |*d, s| d.* = s;
-    // Line pointers are invalidated here, so update them.
-    for (self.lines.items) |*line| {
-        if (line.start >= slot.end) {
-            line.start -= shift;
-            line.end -= shift;
-        }
-    }
-    // 3. Change the size of the pool
-    self.pool.items.len = new_len;
+    self.lines.items.len -= range.len();
 }

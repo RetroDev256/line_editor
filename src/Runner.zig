@@ -6,20 +6,17 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const File = std.fs.File;
-const TermSize = @import("TermSize.zig");
 const LineBuffer = @import("LineBuffer.zig");
 const Range = @import("Range.zig");
 const misc = @import("misc.zig");
 
 const Editor = struct {
-    dirty: bool,
     line: usize,
     file_out: ?[]const u8,
     buffer: LineBuffer,
 
     pub fn init(gpa: Allocator, file_in: ?[]const u8, file_out: ?[]const u8) !Editor {
         return .{
-            .dirty = false,
             .line = 0,
             .file_out = file_out orelse file_in,
             .buffer = if (file_in) |name| try .init(gpa, name) else .empty,
@@ -76,7 +73,7 @@ const Input = struct {
 };
 
 // helper function to get user input
-fn input(self: @This(), gpa: Allocator) !Input {
+fn readInput(self: @This(), gpa: Allocator) !Input {
     var cmd: ArrayListUnmanaged(u8) = .empty;
     defer cmd.deinit(gpa);
     const cmd_w = cmd.writer(gpa);
@@ -100,7 +97,7 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
     loop: while (true) {
         // display command prompt, get input
         try self.print("+ ", .{});
-        const user_input = try self.input(gpa);
+        const user_input = try self.readInput(gpa);
         const cmd = user_input.text;
         defer gpa.free(cmd);
 
@@ -109,24 +106,21 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
         const range_str = cmd[0..range_end];
         const cmd_str = cmd[range_end..];
 
-        if (cmd_str.len == 1 and cmd_str[0] == 'q') {
-            // TODO: once we have undo/redo again,
-            // implement dirty state checking here.
-            break :loop;
-        }
-
         switch (cmd_str.len) {
             0 => try self.lineCommand(range_str),
             1 => switch (cmd_str[0]) {
+                // TODO: once we have undo/redo again,
+                // implement dirty state checking here.
+                'q' => break :loop,
                 'p' => try self.printCommand(range_str),
                 'w' => try self.writeCommand(range_str, &.{}),
-                'i' => try self.insertCommand(gpa, range_str, &.{}),
+                '.' => try self.insertCommand(gpa, range_str, &.{}),
                 'd' => try self.deleteCommand(range_str),
                 else => return error.Malformed,
             },
             else => switch (cmd_str[0]) {
                 'w' => try self.writeCommand(range_str, cmd_str[1..]),
-                'i' => try self.insertCommand(gpa, range_str, cmd_str[1..]),
+                '.' => try self.insertCommand(gpa, range_str, cmd_str[1..]),
                 else => return error.Malformed,
             },
         }
@@ -138,41 +132,35 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
 
 // sets the current line
 fn lineCommand(self: *@This(), range_str: []const u8) !void {
-    const range, const range_type = try Range.parse(range_str, .{
+    const range, _ = try Range.parse(range_str, .{
         .line = self.state.line,
-        .last = self.state.buffer.lines.items.len,
-        .length = 1,
+        .length = self.state.buffer.lines.items.len,
+        .default = .initSingle(self.state.line),
     });
-    if (range_type != .c) return error.InvalidLineCommand;
+    if (range.len() != 1) return error.InvalidLineCommand;
     self.state.line = range.start;
 }
 
-// Prints 16 lines from the current line by default -
-// updates the current line to after the last one printed.
+// Print numbered lines - sets the current line to after the range
 fn printCommand(self: *@This(), range_str: []const u8) !void {
-    // By default, we print lines to fill the terminal
-    const line_count = blk: {
-        const cmd_out_file = self.cmd_out orelse return; // can't print
-        if (try TermSize.size(cmd_out_file)) |size| {
-            break :blk (size.height -| 2) + 1;
-        } else {
-            break :blk 16;
-        }
-    };
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
         .line = self.state.line,
-        .last = self.state.buffer.lines.items.len,
-        .length = line_count,
+        .length = self.state.buffer.lines.items.len,
+        .default = .initSingle(self.state.line),
     });
     // Print the range
     for (range.start..range.end) |idx| {
         // TODO: bounds checking
-        const line = self.state.buffer.lines.items[idx];
-        const text = self.state.buffer.pool.items[line.start..line.end];
-        try self.printLineNumber(idx);
-        try self.print("{s}\n", .{text});
+        if (self.state.buffer.get(idx)) |line| {
+            try self.printLineNumber(idx);
+            try self.print("{s}\n", .{line});
+        } else {
+            break;
+        }
     }
+    // Update the current state
+    self.state.line = range.end;
 }
 
 // Writes the range to the specified (or last specified) file name.
@@ -183,10 +171,11 @@ fn writeCommand(
     data_str: []const u8,
 ) !void {
     // Parse the range
+    const buffer_length = self.state.buffer.lines.items.len;
     const range, _ = try Range.parse(range_str, .{
-        .line = 0,
-        .last = self.state.buffer.lines.items.len,
-        .length = 1,
+        .line = self.state.line,
+        .length = buffer_length,
+        .default = .init(0, buffer_length),
     });
 
     const file_name = switch (data_str.len) {
@@ -199,6 +188,7 @@ fn writeCommand(
 // Without command data, we are in a loop for inserting data.
 // If the "A,B" or "A;B" syntax is used, the loop is broken after the range.
 // With command data, we insert the line through the entire range.
+// Sets the current line to after the current range
 fn insertCommand(
     self: *@This(),
     gpa: Allocator,
@@ -208,8 +198,8 @@ fn insertCommand(
     // Parse the range
     const range, const range_type = try Range.parse(range_str, .{
         .line = self.state.line,
-        .last = self.state.buffer.lines.items.len,
-        .length = 1,
+        .length = self.state.buffer.lines.items.len,
+        .default = .initSingle(self.state.line),
     });
 
     // TODO: check and handle out of bounds?
@@ -218,23 +208,25 @@ fn insertCommand(
         self.state.line = range.start;
         insert: while (true) : (self.state.line += 1) {
             // for "A,B" and "A;B" type loops, break on completion of the range
-            if (self.state.line == range.end and range_type != .c) break :insert;
+            if (range_type == .end_bound or range_type == .length_bound) {
+                if (self.state.line == range.end) break :insert;
+            }
             // get user input
             try self.printLineNumber(self.state.line);
-            const user_input = try self.input(gpa);
-            defer gpa.free(user_input.text);
+            const input = try self.readInput(gpa);
+            defer gpa.free(input.text);
             // Loop escaped by inputting a single period
-            if (misc.eql(".", user_input.text)) break :insert;
+            if (misc.eql(".", input.text)) break :insert;
             // insert the line
-            try self.state.buffer.insert(gpa, self.state.line, user_input.text);
+            try self.state.buffer.insert(gpa, self.state.line, input.text);
             // Loop escaped if EOF is reached
-            if (user_input.hit_eof) break :insert;
+            if (input.hit_eof) break :insert;
         }
     } else {
         // one-shot mode duplicates the string line over the entire range
+        self.state.line = range.end;
         for (range.start..range.end) |line| {
-            self.state.line = line;
-            try self.state.buffer.insert(gpa, self.state.line, data_str);
+            try self.state.buffer.insert(gpa, line, data_str);
         }
     }
 }
@@ -245,8 +237,8 @@ fn deleteCommand(self: *@This(), range_str: []const u8) !void {
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
         .line = self.state.line,
-        .last = self.state.buffer.lines.items.len,
-        .length = 1,
+        .length = self.state.buffer.lines.items.len,
+        .default = .initSingle(self.state.line),
     });
 
     self.state.line = range.start;
