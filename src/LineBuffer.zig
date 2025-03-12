@@ -1,24 +1,15 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
 const Range = @import("Range.zig");
 
-const Slot = struct {
-    // [start, end)
-    start: usize,
-    end: usize,
-
-    fn init(start: usize, end: usize) Slot {
-        assert(end >= start);
-        return .{ .start = start, .end = end };
-    }
-};
-
-// "lines" index into "pool",
-// "pool" is just concatenated strings
-lines: ArrayListUnmanaged(Slot),
-pool: ArrayListUnmanaged(u8),
+// indexing "lines" returns an index to "pool"
+// "pool" stores the content of each "line"
+// TODO: see if we need to have these strings reference-counted,
+// which would be really easy to do as we could have it be the stored
+// value for self.pool
+lines: std.ArrayListUnmanaged(usize),
+pool: std.StringArrayHashMapUnmanaged(void),
 
 pub const empty: @This() = .{
     .lines = .empty,
@@ -35,49 +26,49 @@ pub fn init(gpa: Allocator, file_name: []const u8) !@This() {
         .truncate = false,
     });
     defer file.close();
-    const reader = file.reader();
 
-    var read_start: usize = 0;
-    read_file: while (true) {
-        // Trigger the ArrayList's superlinear growth for reading
-        // The "start + 1" will never overflow, due to "start"
-        // always being less than the superlinear growth factor
-        try self.pool.ensureTotalCapacity(gpa, read_start + 1);
+    var bytes: std.ArrayListUnmanaged(u8) = .empty;
+    // After the loop, bytes should be empty
+    defer assert(bytes.capacity == 0);
+    // In the case of an error with toOwnedSlice
+    errdefer bytes.deinit(gpa);
 
-        // Read all that we can into the allocated memory
-        self.pool.expandToCapacity();
-        const dest_slice = self.pool.items[read_start..];
-        const bytes_read = try reader.readAll(dest_slice);
-        read_start += bytes_read;
+    while (true) {
+        // Each loop we grab what's in bytes as an owned slice
+        assert(bytes.items.len == 0);
 
-        // Check if we have finished reading; trim to fit
-        if (bytes_read != dest_slice.len) {
-            self.pool.shrinkRetainingCapacity(read_start);
-            break :read_file;
-        }
-    }
+        // TODO: benchmark that new thing I was doing with astgen
+        // Read bytes until we encounter EOF or the delimiter
+        const hit_eof = while (true) {
+            var byte: [1]u8 = undefined;
+            const amt_read = try file.read(byte[0..]);
+            if (amt_read == 0) break true;
+            if (byte[0] == '\n') break false;
+            try bytes.append(gpa, byte[0]);
+        };
 
-    // TODO: check that it correctly reads in an extra line for the newline
-    var idx: usize = 0;
-    while (idx < self.pool.items.len) {
-        const start = idx;
-        scan: while (idx < self.pool.items.len) {
-            if (self.pool.items[idx] == '\n') {
-                const line: Slot = .init(start, idx - start);
-                try self.lines.append(gpa, line);
-                idx += 1; // skip the '\n' for next elements
-                break :scan;
-            }
-            idx += 1;
-        }
+        // Add the string to the pool, reference it in "lines"
+        const line = try bytes.toOwnedSlice(gpa);
+        errdefer gpa.free(line);
+        const gop = try self.pool.getOrPut(gpa, line);
+        // Free lines that are never added to the pool
+        if (gop.found_existing) gpa.free(line);
+        // cleaning up self.pool in the case of self.lines.append failing
+        // is already taken care of by errdeffering self.deinit(gpa).
+        try self.lines.append(gpa, gop.index);
+
+        if (hit_eof) break;
     }
 
     return self;
 }
 
 pub fn deinit(self: *@This(), gpa: Allocator) void {
-    self.lines.deinit(gpa);
+    for (self.pool.keys()) |line| {
+        gpa.free(line);
+    }
     self.pool.deinit(gpa);
+    self.lines.deinit(gpa);
     self.* = undefined;
 }
 
@@ -85,9 +76,11 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
 pub fn save(self: *@This(), file_name: []const u8, range: Range) !void {
     const file = try std.fs.cwd().createFile(file_name, .{});
     defer file.close();
-    for (self.lines.items[range.start..range.end], 0..) |line, idx| {
-        try file.writeAll(self.pool.items[line.start..line.end]);
-        if (idx + 1 != self.lines.items.len) {
+
+    const lines_to_save = self.lines.items[range.start..range.end];
+    for (lines_to_save, 0..) |line_index, offset| {
+        try file.writeAll(self.pool.keys()[line_index]);
+        if (offset + 1 != lines_to_save.len) {
             try file.writeAll("\n");
         }
     }
@@ -95,33 +88,22 @@ pub fn save(self: *@This(), file_name: []const u8, range: Range) !void {
 
 // Retrieve a line by line number
 pub fn get(self: @This(), index: usize) ?[]const u8 {
-    if (index >= self.lines.items.len) return null;
-    const lookup = self.lines.items[index];
-    return self.pool.items[lookup.start..lookup.end];
+    if (index > self.lines.items.len) return null;
+    return self.pool.keys()[self.lines.items[index]];
 }
 
-// Insert a new line at a certain line number.
-pub fn insert(self: *@This(), gpa: Allocator, index: usize, line: []const u8) !void {
-    const old_len = self.pool.items.len;
-    try self.pool.appendSlice(gpa, line);
-    errdefer self.lines.items.len = old_len;
-    const interned: Slot = .init(old_len, old_len + line.len);
-    try self.lines.insert(gpa, index, interned);
-}
-
-// Insert multiple lines at a certain line number
-pub fn insertMany(
-    self: *@This(),
-    gpa: Allocator,
-    index: usize,
-    count: usize,
-    line: []const u8,
-) !void {
-    const old_len = self.pool.items.len;
-    try self.pool.appendSlice(gpa, line);
-    errdefer self.lines.items.len = old_len;
-    const dest = try self.lines.addManyAt(gpa, index, count);
-    @memset(dest, .init(old_len, old_len + line.len));
+// Insert some text at a certain line number.
+pub fn insert(self: *@This(), gpa: Allocator, index: usize, text: []const u8) !void {
+    const line = try gpa.dupe(u8, text);
+    errdefer gpa.free(line);
+    const gop = try self.pool.getOrPut(gpa, line);
+    errdefer if (!gop.found_existing) {
+        _ = self.pool.pop() orelse unreachable;
+    };
+    try self.lines.insert(gpa, index, gop.index);
+    // Free lines that are never added to the pool
+    // This is one good case for okdefer :(
+    if (gop.found_existing) gpa.free(line);
 }
 
 // Remove a range of lines
@@ -133,3 +115,5 @@ pub fn removeRange(self: *@This(), range: Range) void {
     }
     self.lines.items.len -= range.len();
 }
+
+// TODO: std.testing.checkAllAllocationFailures
