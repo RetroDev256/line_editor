@@ -16,21 +16,19 @@ pub const empty: @This() = .{
     .pool = .empty,
 };
 
-pub fn init(gpa: Allocator, file_name: []const u8) !@This() {
+pub fn initFile(gpa: Allocator, path: []const u8) !@This() {
     var self: @This() = .empty;
     errdefer self.deinit(gpa);
 
     // Create a new file if there is none, otherwise load current file
-    const file = try std.fs.cwd().createFile(file_name, .{
+    const file = try std.fs.cwd().createFile(path, .{
         .read = true,
         .truncate = false,
     });
     defer file.close();
 
     var bytes: std.ArrayListUnmanaged(u8) = .empty;
-    // After the loop, bytes should be empty
-    defer assert(bytes.capacity == 0);
-    // In the case of an error with toOwnedSlice
+    // In the case of errors with append or toOwnedSlice
     errdefer bytes.deinit(gpa);
 
     while (true) {
@@ -116,4 +114,43 @@ pub fn removeRange(self: *@This(), range: Range) void {
     self.lines.items.len -= range.len();
 }
 
-// TODO: std.testing.checkAllAllocationFailures
+test "memory management and stuff" {
+    try std.testing.checkAllAllocationFailures(
+        std.testing.allocator,
+        generalWorkload,
+        .{},
+    );
+    try std.fs.cwd().deleteFile("temp_testing.txt");
+}
+
+fn generalWorkload(gpa: Allocator) !void {
+    var self: @This() = try .initFile(gpa, "temp_testing.txt");
+    defer self.deinit(gpa);
+
+    const lines: []const []const u8 = &.{
+        "this line is unique",
+        "this line also unique",
+        "this line is not unique",
+        "this line is not unique",
+        "this line is different",
+        "this line is not unique",
+        "this is the last line",
+    };
+
+    for (lines) |line| {
+        try self.insert(gpa, 0, line);
+    }
+
+    for (0..lines.len) |index| {
+        assert(self.get(index) != null);
+    }
+
+    // include one extra because we have an empty line when we read the file
+    assert(self.lines.items.len == lines.len + 1);
+
+    for (0..lines.len + 1) |_| {
+        self.removeRange(.init(0, 1));
+    }
+
+    assert(self.lines.items.len == 0);
+}

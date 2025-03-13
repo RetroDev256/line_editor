@@ -112,3 +112,7 @@ fn parseCmdLine(args: []const []const u8) !Options {
     try std.io.getStdErr().writeAll(usage);
     std.process.exit(0);
 }
+
+test {
+    std.testing.refAllDeclsRecursive(@This());
+}

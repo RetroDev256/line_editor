@@ -30,7 +30,7 @@ pub fn init(
         .cmd_out = cmd_out,
         .line = 0,
         .file_out = file_out orelse file_in,
-        .buffer = if (file_in) |name| try .init(gpa, name) else .empty,
+        .buffer = if (file_in) |path| try .initFile(gpa, path) else .empty,
     };
 }
 
