@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const Runner = @import("Runner.zig");
@@ -23,7 +24,10 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
-    const opt = try parseCmdLine(args);
+    const opt = parseCmdLine(args) catch {
+        try std.io.getStdErr().writeAll(usage);
+        return;
+    };
 
     // Read from the script, otherwise stdin.
     const input = blk: {
@@ -80,7 +84,7 @@ fn parseCmdLine(args: []const []const u8) !Options {
 
     state: switch (State.start) {
         .start => {
-            // yes, this will also skip the program name
+            // Yes, the program name is to be skipped
             idx += 1;
             if (idx >= args.len) return options;
 
@@ -109,8 +113,44 @@ fn parseCmdLine(args: []const []const u8) !Options {
         },
     }
 
-    try std.io.getStdErr().writeAll(usage);
-    std.process.exit(0);
+    return error.InvalidCommandLineOptions;
+}
+
+const expectError = std.testing.expectError;
+const expectEqualDeep = std.testing.expectEqualDeep;
+
+test parseCmdLine {
+    const valid_inputs: []const []const []const u8 = &.{
+        &.{},
+        &.{ "le", "input.txt" },
+        &.{ "le", "-o", "output.txt" },
+        &.{ "le", "input.txt", "-o", "output.txt" },
+        &.{ "le", "input.txt", "-s", "script.txt", "-o", "output.txt" },
+    };
+
+    const valid_results: []const Options = &.{
+        .{ .file_in = null, .file_out = null, .script_in = null },
+        .{ .file_in = "input.txt", .file_out = null, .script_in = null },
+        .{ .file_in = null, .file_out = "output.txt", .script_in = null },
+        .{ .file_in = "input.txt", .file_out = "output.txt", .script_in = null },
+        .{ .file_in = "input.txt", .file_out = "output.txt", .script_in = "script.txt" },
+    };
+
+    for (valid_results, valid_inputs) |expected, input| {
+        try expectEqualDeep(expected, try parseCmdLine(input));
+    }
+
+    const invalid_inputs: []const []const []const u8 = &.{
+        &.{ "le", "trailing_output", "-o" },
+        &.{ "le", "trailing_script", "-s" },
+        &.{ "le", "duplicate_input", "duplicate_input" },
+        &.{ "le", "-o", "output.txt", "-o", "second_output.txt" },
+        &.{ "le", "-s", "script.txt", "-s", "second_script.txt" },
+    };
+
+    for (invalid_inputs) |input| {
+        try expectError(error.InvalidCommandLineOptions, parseCmdLine(input));
+    }
 }
 
 test {

@@ -31,17 +31,17 @@ pub fn initFile(gpa: Allocator, path: []const u8) !@This() {
     // In the case of errors with append or toOwnedSlice
     errdefer bytes.deinit(gpa);
 
-    while (true) {
+    outer: while (true) {
         // Each loop we grab what's in bytes as an owned slice
         assert(bytes.items.len == 0);
 
         // TODO: benchmark that new thing I was doing with astgen
         // Read bytes until we encounter EOF or the delimiter
-        const hit_eof = while (true) {
+        const hit_eof = inner: while (true) {
             var byte: [1]u8 = undefined;
             const amt_read = try file.read(byte[0..]);
-            if (amt_read == 0) break true;
-            if (byte[0] == '\n') break false;
+            if (amt_read == 0) break :inner true;
+            if (byte[0] == '\n') break :inner false;
             try bytes.append(gpa, byte[0]);
         };
 
@@ -55,7 +55,7 @@ pub fn initFile(gpa: Allocator, path: []const u8) !@This() {
         // is already taken care of by errdeffering self.deinit(gpa).
         try self.lines.append(gpa, gop.index);
 
-        if (hit_eof) break;
+        if (hit_eof) break :outer;
     }
 
     return self;
@@ -114,6 +114,9 @@ pub fn removeRange(self: *@This(), range: Range) void {
     self.lines.items.len -= range.len();
 }
 
+const expectEqual = std.testing.expectEqual;
+const expectEqualSlices = std.testing.expectEqualSlices;
+
 test "memory management and stuff" {
     try std.testing.checkAllAllocationFailures(
         std.testing.allocator,
@@ -137,20 +140,23 @@ fn generalWorkload(gpa: Allocator) !void {
         "this is the last line",
     };
 
-    for (lines) |line| {
-        try self.insert(gpa, 0, line);
+    for (lines, 0..) |line, idx| {
+        try self.insert(gpa, idx, line);
     }
 
     for (0..lines.len) |index| {
-        assert(self.get(index) != null);
+        try expectEqualSlices(u8, lines[index], self.get(index) orelse unreachable);
     }
 
     // include one extra because we have an empty line when we read the file
-    assert(self.lines.items.len == lines.len + 1);
+    try expectEqual(lines.len + 1, self.lines.items.len);
+
+    // the pool should be deduplicated (plus the empty file line)
+    try expectEqual(5 + 1, self.pool.count());
 
     for (0..lines.len + 1) |_| {
         self.removeRange(.init(0, 1));
     }
 
-    assert(self.lines.items.len == 0);
+    try expectEqual(0, self.lines.items.len);
 }

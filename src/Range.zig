@@ -110,3 +110,95 @@ pub fn prefixLength(cmd: []const u8) usize {
     };
     return cmd.len;
 }
+
+const expectEqual = std.testing.expectEqual;
+const expectError = std.testing.expectError;
+const expectEqualDeep = std.testing.expectEqualDeep;
+
+test prefixLength {
+    try expectEqual(0, prefixLength(""));
+    try expectEqual(0, prefixLength("hi"));
+    try expectEqual(0, prefixLength("p23,42"));
+    try expectEqual(2, prefixLength(",1"));
+    try expectEqual(2, prefixLength(",1p"));
+    try expectEqual(3, prefixLength("5;$p"));
+    try expectEqual(3, prefixLength("^,8"));
+    try expectEqual(6, prefixLength("002,73p"));
+    try expectEqual(10, prefixLength("1234567890"));
+}
+
+test parseAtom {
+    for (0..5) |line| {
+        for (1..5) |length| {
+            try expectEqual(0, try parseAtom("1", line, length));
+            try expectEqual(line, try parseAtom("^", line, length));
+            try expectEqual(length - 1, try parseAtom("$", line, length));
+        }
+    }
+
+    for (0..5) |line| {
+        try expectError(error.NoBufferEnd, parseAtom("$", line, 0));
+    }
+
+    for (0..5) |line| {
+        for (0..5) |length| {
+            try expectError(error.ZeroIndexedInput, parseAtom("0", line, length));
+        }
+    }
+}
+
+test parse {
+    const results: []const ParseResult = &.{
+        .{ .init(0, 1), .end_bound },
+        .{ .init(0, 5), .end_bound },
+        .{ .init(2, 7), .end_bound },
+        .{ .init(0, 8), .end_bound },
+        .{ .init(15, 99), .end_bound },
+        .{ .init(0, 16), .end_bound },
+        .{ .init(0, 99), .end_bound },
+
+        .{ .init(0, 1), .length_bound },
+        .{ .init(0, 5), .length_bound },
+        .{ .init(2, 6), .length_bound },
+        .{ .init(15, 35), .length_bound },
+        .{ .init(15, 99), .length_bound },
+
+        .{ .init(0, 1), .single },
+        .{ .init(15, 16), .single },
+        .{ .init(98, 99), .single },
+
+        .{ .init(3, 4), .unspecified },
+    };
+
+    const inputs: []const []const u8 = &.{
+        "1,1",
+        "1,5",
+        "3,7",
+        ",8",
+        "^,",
+        ",^",
+        ",",
+
+        "1;1",
+        "1;5",
+        "3;4",
+        ";20",
+        ";",
+
+        "1",
+        "^",
+        "$",
+
+        "",
+    };
+
+    const options: ParseOptions = .{
+        .default = .init(3, 4),
+        .length = 99,
+        .line = 15,
+    };
+
+    for (results, inputs) |expected, input| {
+        try expectEqualDeep(expected, try parse(input, options));
+    }
+}

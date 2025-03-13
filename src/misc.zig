@@ -1,3 +1,6 @@
+const std = @import("std");
+const assert = std.debug.assert;
+
 pub fn isDigit(c: u8) bool {
     return switch (c) {
         '0'...'9' => true,
@@ -41,6 +44,7 @@ pub fn indexOf(haystack: []const u8, needle: u8) ?usize {
 }
 
 pub fn usizeFmt(val: usize, buf: []u8) []const u8 {
+    assert(buf.len > std.math.log10(std.math.maxInt(usize)));
     var conv: usize = val;
     var i: usize = 0;
     while (true) : (i += 1) {
@@ -52,4 +56,40 @@ pub fn usizeFmt(val: usize, buf: []u8) []const u8 {
             return buf[rev_idx..];
         }
     }
+}
+
+const expectEqual = std.testing.expectEqual;
+const expectError = std.testing.expectError;
+const expectEqualSlices = std.testing.expectEqualSlices;
+
+test eql {
+    assert(eql("string one", "string one"));
+    assert(eql("second", "second"));
+    assert(eql("", ""));
+    assert(!eql("not", "matching"));
+    assert(!eql("substring", "sub"));
+}
+
+test parseUsize {
+    try expectEqual(0, try parseUsize(""));
+    try expectEqual(0, try parseUsize("0"));
+    try expectEqual(15091589, try parseUsize("15091589"));
+    try expectEqual(15091589, try parseUsize("00000000000015091589"));
+    try expectError(error.InvalidUsize, parseUsize("bruh"));
+    try expectError(error.ParseUsizeOverflow, parseUsize("99999999999999999999999999999999999999999"));
+}
+
+test indexOf {
+    try expectEqual(0, indexOf("haystack", 'h'));
+    try expectEqual(7, indexOf("0123456*", '*'));
+    try expectEqual(3, indexOf("haysssss", 's'));
+    try expectEqual(null, indexOf("haystack", 'e'));
+    try expectEqual(null, indexOf("haystack", '\x00'));
+}
+
+test usizeFmt {
+    var buffer: [20]u8 = undefined;
+    try expectEqualSlices(u8, "0", usizeFmt(0, &buffer));
+    try expectEqualSlices(u8, "123", usizeFmt(123, &buffer));
+    try expectEqualSlices(u8, "15091589", usizeFmt(15091589, &buffer));
 }
