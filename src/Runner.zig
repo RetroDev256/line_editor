@@ -130,7 +130,7 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
                 'p' => try self.printCommand(range_str),
                 'w' => try self.writeCommand(range_str, &.{}),
                 '.' => try self.insertCommand(gpa, range_str, &.{}),
-                'd' => try self.deleteCommand(range_str),
+                'd' => try self.deleteCommand(gpa, range_str),
                 else => return error.Malformed,
             },
             else => switch (cmd_str[0]) {
@@ -255,7 +255,7 @@ fn insertCommand(
 
 // Deletes lines specified in the range.
 // Sets current line to first index deleted
-fn deleteCommand(self: *@This(), range_str: []const u8) !void {
+fn deleteCommand(self: *@This(), gpa: Allocator, range_str: []const u8) !void {
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
         .line = self.line,
@@ -264,7 +264,7 @@ fn deleteCommand(self: *@This(), range_str: []const u8) !void {
     });
 
     self.line = range.start;
-    self.buffer.removeRange(range);
+    self.buffer.removeRange(gpa, range);
 }
 
 // TODO: testing

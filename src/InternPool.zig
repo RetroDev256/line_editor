@@ -25,6 +25,7 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
     }
 
     self.pool.deinit(gpa);
+    self.* = undefined;
 }
 
 // Add a string to the intern pool, returning a stable pointer to the string.
@@ -51,11 +52,14 @@ pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
     // Write the header & string
     const header: *LineHeader = @ptrCast(bytes.ptr);
     header.* = .{ .ref = 1, .len = str.len };
-    @memcpy(bytes[@sizeOf(LineHeader)..], str);
+    const line_string = bytes[@sizeOf(LineHeader)..];
+    @memcpy(line_string, str);
 
-    // Add to the pool & return the stable pointer
-    try self.pool.putNoClobber(gpa, str, bytes.ptr);
-    return bytes[@sizeOf(LineHeader)..];
+    // Add to the pool & return the stable pointer to the string.
+    // !!! IMPORTANT !!! - The pool does not store it's own keys,
+    // so we must give the pool the stable pointer to the string.
+    try self.pool.putNoClobber(gpa, line_string, bytes.ptr);
+    return line_string;
 }
 
 // Removes a string from the intern pool. It decrements a reference

@@ -2,16 +2,11 @@ const std = @import("std");
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const Range = @import("Range.zig");
+const InternPool = @import("InternPool.zig");
 
-// indexing "lines" returns an index to "pool"
-// "pool" stores the content of each "line"
-// TODO: see if we need to have these strings reference-counted,
-// which would be really easy to do as we could have it be the stored
-// value for self.pool
-// TODO: change the interface to use readers/writers instead of file names
-// (this will primarily help with testing)
-lines: std.ArrayListUnmanaged(usize),
-pool: std.StringArrayHashMapUnmanaged(void),
+// All of the lines are owned by the pool
+lines: std.ArrayListUnmanaged([]const u8),
+pool: InternPool,
 
 pub const empty: @This() = .{
     .lines = .empty,
@@ -23,58 +18,39 @@ pub fn initReader(gpa: Allocator, reader: anytype) !@This() {
     errdefer self.deinit(gpa);
 
     var bytes: std.ArrayListUnmanaged(u8) = .empty;
-    // In the case of errors with append or toOwnedSlice
-    errdefer bytes.deinit(gpa);
+    defer bytes.deinit(gpa);
 
-    outer: while (true) {
-        // Each loop we grab what's in bytes as an owned slice
-        assert(bytes.items.len == 0);
-
-        // TODO: benchmark that new thing I was doing with astgen
-        // Read bytes until we encounter EOF or the delimiter
+    read_lines: while (true) {
+        // TODO: try benchmarking what I tried in astgen,
+        // where I appendAssumeCapacity capacity times.
         const hit_eof = inner: while (true) {
             var byte: [1]u8 = undefined;
-            const amt_read = try reader.read(byte[0..]);
-            if (amt_read == 0) break :inner true;
+            const read = try reader.read(byte[0..]);
+            if (read == 0) break :inner true;
             if (byte[0] == '\n') break :inner false;
             try bytes.append(gpa, byte[0]);
         };
 
-        // Add the string to the pool, reference it in "lines"
-        const line = try bytes.toOwnedSlice(gpa);
-        errdefer gpa.free(line);
-        const gop = try self.pool.getOrPut(gpa, line);
-        errdefer if (!gop.found_existing) {
-            _ = self.pool.pop() orelse unreachable;
-        };
-        // cleaning up self.pool in the case of self.lines.append failing
-        // is already taken care of by errdeffering self.deinit(gpa).
-        try self.lines.append(gpa, gop.index);
-        // Free lines that are never added to the pool
-        // This is one good case for okdefer :(
-        if (gop.found_existing) gpa.free(line);
+        const line = try self.pool.add(gpa, bytes.items);
+        try self.lines.append(gpa, line);
 
-        if (hit_eof) break :outer;
+        if (hit_eof) break :read_lines;
     }
 
     return self;
 }
 
 pub fn deinit(self: *@This(), gpa: Allocator) void {
-    for (self.pool.keys()) |line| {
-        gpa.free(line);
-    }
-    self.pool.deinit(gpa);
     self.lines.deinit(gpa);
+    self.pool.deinit(gpa);
     self.* = undefined;
 }
 
 // Save a range of lines to a file.
 pub fn save(self: *@This(), writer: anytype, range: Range) !void {
-    const lines_to_save = self.lines.items[range.start..range.end];
-    for (lines_to_save, 0..) |line_index, offset| {
-        try writer.writeAll(self.pool.keys()[line_index]);
-        if (offset + 1 != lines_to_save.len) {
+    for (range.start..range.end) |line_no| {
+        try writer.writeAll(self.lines.items[line_no]);
+        if (line_no + 1 != range.end) {
             try writer.writeAll("\n");
         }
     }
@@ -83,30 +59,27 @@ pub fn save(self: *@This(), writer: anytype, range: Range) !void {
 // Retrieve a line by line number
 pub fn get(self: @This(), index: usize) ?[]const u8 {
     if (index > self.lines.items.len) return null;
-    return self.pool.keys()[self.lines.items[index]];
+    return self.lines.items[index];
 }
 
 // Insert some text at a certain line number.
 pub fn insert(self: *@This(), gpa: Allocator, index: usize, text: []const u8) !void {
-    const line = try gpa.dupe(u8, text);
-    errdefer gpa.free(line);
-    const gop = try self.pool.getOrPut(gpa, line);
-    errdefer if (!gop.found_existing) {
-        _ = self.pool.pop() orelse unreachable;
-    };
-    try self.lines.insert(gpa, index, gop.index);
-    // Free lines that are never added to the pool
-    // This is one good case for okdefer :(
-    if (gop.found_existing) gpa.free(line);
+    const line = try self.pool.add(gpa, text);
+    errdefer self.pool.remove(gpa, text);
+    try self.lines.insert(gpa, index, line);
 }
 
 // Remove a range of lines
-pub fn removeRange(self: *@This(), range: Range) void {
-    const source = self.lines.items[range.end..];
-    const dest = self.lines.items[range.start..];
-    for (dest[0..source.len], source) |*d, s| {
-        d.* = s;
+pub fn removeRange(self: *@This(), gpa: Allocator, range: Range) void {
+    for (range.start..range.end) |line_no| {
+        self.pool.remove(gpa, self.lines.items[line_no]);
     }
+
+    const line_count = self.lines.items.len;
+    for (range.end..line_count, range.start..) |src, dest| {
+        self.lines.items[dest] = self.lines.items[src];
+    }
+
     self.lines.items.len -= range.len();
 }
 
@@ -153,11 +126,8 @@ fn generalWorkload(gpa: Allocator) !void {
     // include extra because we have more lines when we read the file
     try expectEqual(lines.len + 4, self.lines.items.len);
 
-    // the pool should be deduplicated (plus the file lines)
-    try expectEqual(5 + 4, self.pool.count());
-
     for (0..lines.len + 4) |_| {
-        self.removeRange(.init(0, 1));
+        self.removeRange(gpa, .init(0, 1));
     }
 
     try expectEqual(0, self.lines.items.len);
