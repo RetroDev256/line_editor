@@ -20,21 +20,20 @@ pub fn initReader(gpa: Allocator, reader: anytype) !@This() {
     var bytes: std.ArrayListUnmanaged(u8) = .empty;
     defer bytes.deinit(gpa);
 
-    read_lines: while (true) {
-        // TODO: try benchmarking what I tried in astgen,
-        // where I appendAssumeCapacity capacity times.
-        const hit_eof = inner: while (true) {
+    while (true) {
+        const hit_eof = while (true) {
             var byte: [1]u8 = undefined;
             const read = try reader.read(byte[0..]);
-            if (read == 0) break :inner true;
-            if (byte[0] == '\n') break :inner false;
+            if (read == 0) break true;
+            if (byte[0] == '\n') break false;
             try bytes.append(gpa, byte[0]);
         };
 
         const line = try self.pool.add(gpa, bytes.items);
+        bytes.clearRetainingCapacity();
         try self.lines.append(gpa, line);
 
-        if (hit_eof) break :read_lines;
+        if (hit_eof) break;
     }
 
     return self;
