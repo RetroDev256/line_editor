@@ -25,12 +25,22 @@ pub fn init(
     file_in: ?[]const u8,
     file_out: ?[]const u8,
 ) !@This() {
+    const buffer: LineBuffer = blk: {
+        if (file_in) |path| {
+            const file = try std.fs.cwd().createFile(path, .{ .truncate = false });
+            defer file.close();
+            break :blk try .initReader(gpa, file.reader());
+        } else {
+            break :blk .empty;
+        }
+    };
+
     return .{
         .cmd_in = cmd_in,
         .cmd_out = cmd_out,
         .line = 0,
         .file_out = file_out orelse file_in,
-        .buffer = if (file_in) |path| try .initFile(gpa, path) else .empty,
+        .buffer = buffer,
     };
 }
 
@@ -188,7 +198,12 @@ fn writeCommand(
         0 => self.file_out orelse return error.FileNameNotSet,
         else => data_str,
     };
-    try self.buffer.save(file_name, range);
+    // TODO: create a separate file then atomic rename in place to
+    // avoid situations where you save the file but it fails halfway through
+    // losing all of your data - kinda like what vscode does
+    const file = try std.fs.cwd().createFile(file_name, .{});
+    defer file.close();
+    try self.buffer.save(file.writer(), range);
 }
 
 // Without command data, we are in a loop for inserting data.

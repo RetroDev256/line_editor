@@ -8,6 +8,8 @@ const Range = @import("Range.zig");
 // TODO: see if we need to have these strings reference-counted,
 // which would be really easy to do as we could have it be the stored
 // value for self.pool
+// TODO: change the interface to use readers/writers instead of file names
+// (this will primarily help with testing)
 lines: std.ArrayListUnmanaged(usize),
 pool: std.StringArrayHashMapUnmanaged(void),
 
@@ -16,16 +18,9 @@ pub const empty: @This() = .{
     .pool = .empty,
 };
 
-pub fn initFile(gpa: Allocator, path: []const u8) !@This() {
+pub fn initReader(gpa: Allocator, reader: anytype) !@This() {
     var self: @This() = .empty;
     errdefer self.deinit(gpa);
-
-    // Create a new file if there is none, otherwise load current file
-    const file = try std.fs.cwd().createFile(path, .{
-        .read = true,
-        .truncate = false,
-    });
-    defer file.close();
 
     var bytes: std.ArrayListUnmanaged(u8) = .empty;
     // In the case of errors with append or toOwnedSlice
@@ -39,7 +34,7 @@ pub fn initFile(gpa: Allocator, path: []const u8) !@This() {
         // Read bytes until we encounter EOF or the delimiter
         const hit_eof = inner: while (true) {
             var byte: [1]u8 = undefined;
-            const amt_read = try file.read(byte[0..]);
+            const amt_read = try reader.read(byte[0..]);
             if (amt_read == 0) break :inner true;
             if (byte[0] == '\n') break :inner false;
             try bytes.append(gpa, byte[0]);
@@ -49,11 +44,15 @@ pub fn initFile(gpa: Allocator, path: []const u8) !@This() {
         const line = try bytes.toOwnedSlice(gpa);
         errdefer gpa.free(line);
         const gop = try self.pool.getOrPut(gpa, line);
-        // Free lines that are never added to the pool
-        if (gop.found_existing) gpa.free(line);
+        errdefer if (!gop.found_existing) {
+            _ = self.pool.pop() orelse unreachable;
+        };
         // cleaning up self.pool in the case of self.lines.append failing
         // is already taken care of by errdeffering self.deinit(gpa).
         try self.lines.append(gpa, gop.index);
+        // Free lines that are never added to the pool
+        // This is one good case for okdefer :(
+        if (gop.found_existing) gpa.free(line);
 
         if (hit_eof) break :outer;
     }
@@ -71,15 +70,12 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
 }
 
 // Save a range of lines to a file.
-pub fn save(self: *@This(), file_name: []const u8, range: Range) !void {
-    const file = try std.fs.cwd().createFile(file_name, .{});
-    defer file.close();
-
+pub fn save(self: *@This(), writer: anytype, range: Range) !void {
     const lines_to_save = self.lines.items[range.start..range.end];
     for (lines_to_save, 0..) |line_index, offset| {
-        try file.writeAll(self.pool.keys()[line_index]);
+        try writer.writeAll(self.pool.keys()[line_index]);
         if (offset + 1 != lines_to_save.len) {
-            try file.writeAll("\n");
+            try writer.writeAll("\n");
         }
     }
 }
@@ -123,11 +119,17 @@ test "memory management and stuff" {
         generalWorkload,
         .{},
     );
-    try std.fs.cwd().deleteFile("temp_testing.txt");
 }
 
 fn generalWorkload(gpa: Allocator) !void {
-    var self: @This() = try .initFile(gpa, "temp_testing.txt");
+    var stream = std.io.fixedBufferStream(
+        \\This is the original file content -
+        \\testing allocation and stuff for the
+        \\LineBuffer.
+        \\
+    );
+
+    var self: @This() = try .initReader(gpa, stream.reader());
     defer self.deinit(gpa);
 
     const lines: []const []const u8 = &.{
@@ -148,13 +150,13 @@ fn generalWorkload(gpa: Allocator) !void {
         try expectEqualSlices(u8, lines[index], self.get(index) orelse unreachable);
     }
 
-    // include one extra because we have an empty line when we read the file
-    try expectEqual(lines.len + 1, self.lines.items.len);
+    // include extra because we have more lines when we read the file
+    try expectEqual(lines.len + 4, self.lines.items.len);
 
-    // the pool should be deduplicated (plus the empty file line)
-    try expectEqual(5 + 1, self.pool.count());
+    // the pool should be deduplicated (plus the file lines)
+    try expectEqual(5 + 4, self.pool.count());
 
-    for (0..lines.len + 1) |_| {
+    for (0..lines.len + 4) |_| {
         self.removeRange(.init(0, 1));
     }
 

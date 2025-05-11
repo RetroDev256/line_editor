@@ -5,6 +5,22 @@ const builtin = @import("builtin");
 const Runner = @import("Runner.zig");
 const misc = @import("misc.zig");
 
+// GOAL:
+// make this a lightweight program to edit SINGLE files.
+
+// CHANGE OF PLANS?
+// - this is still a line editor...
+// - there is no cursor, but you can see some lines
+// - commands are entered at the bottom of the screen
+// - the current line number (offset/absolute/I haven't decided) is before the lines
+// - the print command is merged with the line command to display sections
+// - searching through the text will display all lines containing the matching text,
+// but not with non-matching lines inbetween (maybe one line above for context for each?)
+
+// CHANGE OF CHANGE OF PLANS TODO:???:
+// There is ONLY command mode.
+// Append/insert is done with `.[string][enter]` at all times
+
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
 pub fn main() !void {
