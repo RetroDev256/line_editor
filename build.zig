@@ -3,9 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const share = b.option(bool, "share", "Prepare for distribution");
     const strip = b.option(bool, "strip", "Strip debug info");
-    const optimize = b.standardOptimizeOption(
-        .{ .preferred_optimize_mode = .ReleaseSmall },
-    );
+    const optimize = b.standardOptimizeOption();
 
     if (share orelse false) {
         buildAll(b, optimize, strip);
@@ -28,14 +26,13 @@ const target_strs = .{
 fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) void {
     // build each target and install them
     inline for (target_strs) |target_str| {
-        const query = std.Build.parseTargetQuery(
-            .{ .arch_os_abi = target_str },
-        );
+        const query = std.Build.parseTargetQuery(.{ .arch_os_abi = target_str });
+        const target = b.resolveTargetQuery(query catch unreachable);
 
         const root_mod = b.addModule("le", .{
             .root_source_file = b.path("src/main.zig"),
             .optimize = optimize,
-            .target = b.resolveTargetQuery(query catch unreachable),
+            .target = target,
         });
         root_mod.strip = strip;
         root_mod.single_threaded = true;
@@ -43,7 +40,7 @@ fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) voi
 
         // exe steps
         const exe = b.addExecutable(.{
-            .name = "" ++ target_str,
+            .name = target_str,
             .root_module = root_mod,
         });
         exe.link_function_sections = true;
