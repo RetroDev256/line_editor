@@ -27,7 +27,10 @@ pub fn init(
 ) !@This() {
     const buffer: LineBuffer = blk: {
         if (file_in) |path| {
-            const file = try std.fs.cwd().createFile(path, .{ .truncate = false });
+            const file = try std.fs.cwd().createFile(path, .{
+                .truncate = false,
+                .read = true,
+            });
             defer file.close();
             break :blk try .initReader(gpa, file.reader());
         } else {

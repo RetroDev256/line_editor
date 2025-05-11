@@ -28,15 +28,10 @@ pub fn main() !void {
         if (builtin.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
         break :gpa switch (builtin.mode) {
             .Debug, .ReleaseSafe => .{ debug_allocator.allocator(), true },
-            .ReleaseFast, .ReleaseSmall => .{
-                if (builtin.single_threaded) std.heap.page_allocator else std.heap.smp_allocator,
-                false,
-            },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.smp_allocator, false },
         };
     };
-    defer if (is_debug) {
-        _ = debug_allocator.deinit();
-    };
+    defer if (is_debug) assert(debug_allocator.deinit() == .ok);
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);

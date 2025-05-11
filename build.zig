@@ -3,7 +3,7 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const share = b.option(bool, "share", "Prepare for distribution");
     const strip = b.option(bool, "strip", "Strip debug info");
-    const optimize = b.standardOptimizeOption();
+    const optimize = b.standardOptimizeOption(.{});
 
     if (share orelse false) {
         buildAll(b, optimize, strip);
@@ -35,7 +35,6 @@ fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) voi
             .target = target,
         });
         root_mod.strip = strip;
-        root_mod.single_threaded = true;
         root_mod.omit_frame_pointer = true;
 
         // exe steps
@@ -56,7 +55,6 @@ fn buildNative(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) 
         .target = b.standardTargetOptions(.{}),
     });
     root_mod.strip = strip;
-    root_mod.single_threaded = true;
     root_mod.omit_frame_pointer = true;
 
     // exe step

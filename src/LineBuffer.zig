@@ -30,6 +30,7 @@ pub fn initReader(gpa: Allocator, reader: anytype) !@This() {
         };
 
         const line = try self.pool.add(gpa, bytes.items);
+        errdefer self.pool.remove(gpa, line);
         bytes.clearRetainingCapacity();
         try self.lines.append(gpa, line);
 
