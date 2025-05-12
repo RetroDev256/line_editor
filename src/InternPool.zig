@@ -2,30 +2,29 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
 
 const Entry = struct { ref: usize, str: []const u8 };
-pool: std.StringHashMapUnmanaged(Entry),
+map: std.StringHashMapUnmanaged(Entry),
 
 // Construct new empty string intern pool
-pub const empty: @This() = .{ .pool = .empty };
+pub const empty: @This() = .{ .map = .empty };
 
 // Free all memory allocated by the intern pool. Additionally, ensure
 // all memory allocated by the pool in it's lifetime is also freed.
 pub fn deinit(self: *@This(), gpa: Allocator) void {
-    var iter = self.pool.valueIterator();
+    var iter = self.map.valueIterator();
     while (iter.next()) |entry| {
         gpa.free(entry.str);
     }
 
-    self.pool.deinit(gpa);
+    self.map.deinit(gpa);
     self.* = undefined;
 }
 
 // Add a string to the intern pool, returning a stable pointer to the string.
 // The pointer will last as far as the string is not removed with `remove()`.
 pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
-    if (self.pool.getPtr(str)) |entry| {
+    if (self.map.getPtr(str)) |entry| {
         // Update & return pre-existing
         entry.ref += 1;
         return entry.str;
@@ -35,9 +34,9 @@ pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
     const entry_str = try gpa.dupe(u8, str);
     errdefer gpa.free(entry_str);
 
-    // Add the entry to our pool, use the owned string
+    // Add the entry to our map, use the owned string
     const entry: Entry = .{ .ref = 1, .str = entry_str };
-    try self.pool.putNoClobber(gpa, entry_str, entry);
+    try self.map.putNoClobber(gpa, entry_str, entry);
 
     // Return the stable pointer
     return entry_str;
@@ -46,7 +45,7 @@ pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
 // Reduces the reference count of a string in the intern pool, and
 // frees the string if it is unreferenced. Asserts that it exists.
 pub fn remove(self: *@This(), gpa: Allocator, str: []const u8) void {
-    const entry = self.pool.getEntry(str) orelse unreachable;
+    const entry = self.map.getEntry(str) orelse unreachable;
 
     // Update reference counter
     entry.value_ptr.ref -= 1;
@@ -54,7 +53,7 @@ pub fn remove(self: *@This(), gpa: Allocator, str: []const u8) void {
     // Remove unreferenced strings
     if (entry.value_ptr.ref == 0) {
         gpa.free(entry.value_ptr.str);
-        self.pool.removeByPtr(entry.key_ptr);
+        self.map.removeByPtr(entry.key_ptr);
     }
 }
 
@@ -80,19 +79,19 @@ test "Intern Pool" {
     try std.testing.expectEqual(b.ptr, e.ptr);
     try std.testing.expectEqual(c.ptr, d.ptr);
 
-    try std.testing.expectEqual(intern_pool.pool.size, 3);
+    try std.testing.expectEqual(intern_pool.map.size, 3);
 
     // Removing elements
     intern_pool.remove(gpa, "y");
     intern_pool.remove(gpa, "z");
-    try std.testing.expectEqual(intern_pool.pool.size, 3);
+    try std.testing.expectEqual(intern_pool.map.size, 3);
 
     intern_pool.remove(gpa, "y");
-    try std.testing.expectEqual(intern_pool.pool.size, 2);
+    try std.testing.expectEqual(intern_pool.map.size, 2);
 
     intern_pool.remove(gpa, "z");
-    try std.testing.expectEqual(intern_pool.pool.size, 1);
+    try std.testing.expectEqual(intern_pool.map.size, 1);
 
     intern_pool.remove(gpa, "x");
-    try std.testing.expectEqual(intern_pool.pool.size, 0);
+    try std.testing.expectEqual(intern_pool.map.size, 0);
 }
