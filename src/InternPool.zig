@@ -4,8 +4,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const Line = struct { ref: usize, str: []const u8 };
-pool: std.StringHashMapUnmanaged(Line),
+const Entry = struct { ref: usize, str: []const u8 };
+pool: std.StringHashMapUnmanaged(Entry),
 
 // Construct new empty string intern pool
 pub const empty: @This() = .{ .pool = .empty };
@@ -14,8 +14,8 @@ pub const empty: @This() = .{ .pool = .empty };
 // all memory allocated by the pool in it's lifetime is also freed.
 pub fn deinit(self: *@This(), gpa: Allocator) void {
     var iter = self.pool.valueIterator();
-    while (iter.next()) |line| {
-        gpa.free(line.str);
+    while (iter.next()) |entry| {
+        gpa.free(entry.str);
     }
 
     self.pool.deinit(gpa);
@@ -25,36 +25,36 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
 // Add a string to the intern pool, returning a stable pointer to the string.
 // The pointer will last as far as the string is not removed with `remove()`.
 pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
-    if (self.pool.getPtr(str)) |line| {
+    if (self.pool.getPtr(str)) |entry| {
         // Update & return pre-existing
-        line.ref += 1;
-        return line.str;
+        entry.ref += 1;
+        return entry.str;
     }
 
     // Allocate memory for the string
-    const line_str = try gpa.dupe(u8, str);
-    errdefer gpa.free(line_str);
+    const entry_str = try gpa.dupe(u8, str);
+    errdefer gpa.free(entry_str);
 
-    // Add the line to our pool, use the owned string
-    const line: Line = .{ .ref = 1, .str = line_str };
-    try self.pool.putNoClobber(gpa, line_str, line);
+    // Add the entry to our pool, use the owned string
+    const entry: Entry = .{ .ref = 1, .str = entry_str };
+    try self.pool.putNoClobber(gpa, entry_str, entry);
 
     // Return the stable pointer
-    return line_str;
+    return entry_str;
 }
 
 // Reduces the reference count of a string in the intern pool, and
 // frees the string if it is unreferenced. Asserts that it exists.
 pub fn remove(self: *@This(), gpa: Allocator, str: []const u8) void {
-    const line = self.pool.getEntry(str) orelse unreachable;
+    const entry = self.pool.getEntry(str) orelse unreachable;
 
     // Update reference counter
-    line.value_ptr.ref -= 1;
+    entry.value_ptr.ref -= 1;
 
     // Remove unreferenced strings
-    if (line.value_ptr.ref == 0) {
-        gpa.free(line.value_ptr.str);
-        self.pool.removeByPtr(line.key_ptr);
+    if (entry.value_ptr.ref == 0) {
+        gpa.free(entry.value_ptr.str);
+        self.pool.removeByPtr(entry.key_ptr);
     }
 }
 
