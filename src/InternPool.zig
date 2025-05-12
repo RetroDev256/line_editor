@@ -4,9 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const LineHeader = struct { ref: usize, len: usize };
-const Line = [*]align(@alignOf(LineHeader)) u8;
-
+const Line = struct { ref: usize, str: []const u8 };
 pool: std.StringHashMapUnmanaged(Line),
 
 // Construct new empty string intern pool
@@ -17,11 +15,7 @@ pub const empty: @This() = .{ .pool = .empty };
 pub fn deinit(self: *@This(), gpa: Allocator) void {
     var iter = self.pool.valueIterator();
     while (iter.next()) |line| {
-        const header: *const LineHeader = @ptrCast(line.*);
-        assert(header.ref != 0);
-
-        const len = @sizeOf(LineHeader) + header.len;
-        gpa.free(line.*[0..len]);
+        gpa.free(line.str);
     }
 
     self.pool.deinit(gpa);
@@ -31,56 +25,36 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
 // Add a string to the intern pool, returning a stable pointer to the string.
 // The pointer will last as far as the string is not removed with `remove()`.
 pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
-    if (self.pool.get(str)) |line| {
-        // Get the header & data
-        const header: *LineHeader = @ptrCast(line);
-        assert(header.ref != 0);
-
-        // Update reference counter
-        header.ref += 1;
-
-        // Return stable pointer
-        assert(header.len == str.len);
-        return line[@sizeOf(LineHeader)..][0..str.len];
+    if (self.pool.getPtr(str)) |line| {
+        // Update & return pre-existing
+        line.ref += 1;
+        return line.str;
     }
 
-    // Allocate memory for the Line
-    const len = @sizeOf(LineHeader) + str.len;
-    const bytes = try gpa.alignedAlloc(u8, .of(LineHeader), len);
-    errdefer gpa.free(bytes);
+    // Allocate memory for the string
+    const line_str = try gpa.dupe(u8, str);
+    errdefer gpa.free(line_str);
 
-    // Write the header & string
-    const header: *LineHeader = @ptrCast(bytes.ptr);
-    header.* = .{ .ref = 1, .len = str.len };
-    const line_string = bytes[@sizeOf(LineHeader)..];
-    @memcpy(line_string, str);
+    // Add the line to our pool, use the owned string
+    const line: Line = .{ .ref = 1, .str = line_str };
+    try self.pool.putNoClobber(gpa, line_str, line);
 
-    // Add to the pool & return the stable pointer to the string.
-    // !!! IMPORTANT !!! - The pool does not store it's own keys,
-    // so we must give the pool the stable pointer to the string.
-    try self.pool.putNoClobber(gpa, line_string, bytes.ptr);
-    return line_string;
+    // Return the stable pointer
+    return line_str;
 }
 
-// Removes a string from the intern pool. It decrements a reference
-// counter to ensure that duplicate strings will still be allocated.
-// This function asserts that the string exists in the intern pool.
+// Reduces the reference count of a string in the intern pool, and
+// frees the string if it is unreferenced. Asserts that it exists.
 pub fn remove(self: *@This(), gpa: Allocator, str: []const u8) void {
-    const line = self.pool.get(str) orelse unreachable;
-
-    // Get the header & data
-    const header: *LineHeader = @ptrCast(line);
-    assert(header.ref != 0);
+    const line = self.pool.getEntry(str) orelse unreachable;
 
     // Update reference counter
-    header.ref -= 1;
+    line.value_ptr.ref -= 1;
 
-    // Free the string if there are no more references
-    if (header.ref == 0) {
-        assert(header.len == str.len);
-        const len = @sizeOf(LineHeader) + header.len;
-        assert(self.pool.remove(str));
-        gpa.free(line[0..len]);
+    // Remove unreferenced strings
+    if (line.value_ptr.ref == 0) {
+        gpa.free(line.value_ptr.str);
+        self.pool.removeByPtr(line.key_ptr);
     }
 }
 

@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// TODO: add color, so we can gray out user input and line numbers
+
 pub const Size = struct { width: u16, height: u16 };
 
 pub const TerminalInfo = switch (builtin.os.tag) {
