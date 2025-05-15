@@ -32,7 +32,8 @@ pub fn init(
                 .read = true,
             });
             defer file.close();
-            break :blk try .initReader(gpa, file.reader());
+            var bw = std.io.bufferedReader(file.reader());
+            break :blk try .initReader(gpa, bw.reader());
         } else {
             break :blk .empty;
         }

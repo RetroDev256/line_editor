@@ -3,8 +3,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Entry = struct { ref: usize, str: []const u8 };
-map: std.StringHashMapUnmanaged(Entry),
+map: std.StringHashMapUnmanaged(usize),
 
 // Construct new empty string intern pool
 pub const empty: @This() = .{ .map = .empty };
@@ -12,9 +11,9 @@ pub const empty: @This() = .{ .map = .empty };
 // Free all memory allocated by the intern pool. Additionally, ensure
 // all memory allocated by the pool in it's lifetime is also freed.
 pub fn deinit(self: *@This(), gpa: Allocator) void {
-    var iter = self.map.valueIterator();
+    var iter = self.map.keyIterator();
     while (iter.next()) |entry| {
-        gpa.free(entry.str);
+        gpa.free(entry.*);
     }
 
     self.map.deinit(gpa);
@@ -24,10 +23,10 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
 // Add a string to the intern pool, returning a stable pointer to the string.
 // The pointer will last as far as the string is not removed with `remove()`.
 pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
-    if (self.map.getPtr(str)) |entry| {
+    if (self.map.getEntry(str)) |entry| {
         // Update & return pre-existing
-        entry.ref += 1;
-        return entry.str;
+        entry.value_ptr.* += 1;
+        return entry.key_ptr.*;
     }
 
     // Allocate memory for the string
@@ -35,8 +34,7 @@ pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
     errdefer gpa.free(entry_str);
 
     // Add the entry to our map, use the owned string
-    const entry: Entry = .{ .ref = 1, .str = entry_str };
-    try self.map.putNoClobber(gpa, entry_str, entry);
+    try self.map.putNoClobber(gpa, entry_str, 1);
 
     // Return the stable pointer
     return entry_str;
@@ -48,11 +46,11 @@ pub fn remove(self: *@This(), gpa: Allocator, str: []const u8) void {
     const entry = self.map.getEntry(str) orelse unreachable;
 
     // Update reference counter
-    entry.value_ptr.ref -= 1;
+    entry.value_ptr.* -= 1;
 
     // Remove unreferenced strings
-    if (entry.value_ptr.ref == 0) {
-        gpa.free(entry.value_ptr.str);
+    if (entry.value_ptr.* == 0) {
+        gpa.free(entry.key_ptr.*);
         self.map.removeByPtr(entry.key_ptr);
     }
 }
