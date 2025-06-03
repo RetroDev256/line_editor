@@ -12,39 +12,15 @@ const misc = @import("misc.zig");
 
 // TODO: change the type of cmd_in and cmd_out when writergate gets here :)
 
-cmd_in: File,
-cmd_out: ?File,
-file_out: ?[]const u8,
+file: ?[]const u8,
 line: usize,
 buffer: LineBuffer,
 
-pub fn init(
-    gpa: Allocator,
-    cmd_in: File,
-    cmd_out: ?File,
-    file_in: ?[]const u8,
-    file_out: ?[]const u8,
-) !@This() {
-    const buffer: LineBuffer = blk: {
-        if (file_in) |path| {
-            const file = try std.fs.cwd().createFile(path, .{
-                .truncate = false,
-                .read = true,
-            });
-            defer file.close();
-            var bw = std.io.bufferedReader(file.reader());
-            break :blk try .initReader(gpa, bw.reader());
-        } else {
-            break :blk .empty;
-        }
-    };
-
+pub fn init(gpa: Allocator, file_path: ?[]const u8) !@This() {
     return .{
-        .cmd_in = cmd_in,
-        .cmd_out = cmd_out,
+        .file = file_path,
         .line = 0,
-        .file_out = file_out orelse file_in,
-        .buffer = buffer,
+        .buffer = try .init(gpa, file_path),
     };
 }
 
@@ -53,10 +29,8 @@ pub fn deinit(self: *@This(), gpa: Allocator) void {
     self.* = undefined;
 }
 
-fn writeAll(self: @This(), bytes: []const u8) !void {
-    if (self.cmd_out) |output| {
-        try output.writeAll(bytes);
-    }
+fn writeAll(bytes: []const u8) !void {
+    try std.io.getStdOut().writeAll(bytes);
 }
 
 fn printLineNumber(self: @This(), line: usize) !void {
@@ -68,21 +42,21 @@ fn printLineNumber(self: @This(), line: usize) !void {
     const width = misc.usizeFmt(line_count + 1, &buf).len;
 
     if (line == self.line) {
-        try self.writeAll("^");
+        try writeAll("^");
     } else {
-        try self.writeAll(" ");
+        try writeAll(" ");
     }
 
     if (line_count > 0 and line == line_count - 1) {
         const padding = width - 1;
-        for (0..padding) |_| try self.writeAll(" ");
-        try self.writeAll("$ ");
+        for (0..padding) |_| try writeAll(" ");
+        try writeAll("$ ");
     } else {
         const line_str = misc.usizeFmt(line + 1, &buf);
         const padding = width - line_str.len;
-        for (0..padding) |_| try self.writeAll(" ");
-        try self.writeAll(line_str);
-        try self.writeAll(" ");
+        for (0..padding) |_| try writeAll(" ");
+        try writeAll(line_str);
+        try writeAll(" ");
     }
 }
 
@@ -92,11 +66,11 @@ const Input = struct {
 };
 
 // helper function to get user input
-fn readInput(self: @This(), gpa: Allocator) !Input {
+fn readInput(gpa: Allocator) !Input {
     var cmd: ArrayListUnmanaged(u8) = .empty;
     defer cmd.deinit(gpa);
     const cmd_w = cmd.writer(gpa);
-    const reader = self.cmd_in.reader();
+    const reader = std.io.getStdIn().reader();
     // Read one line into memory; Determine if we have hit EOF
     const hit_eof = eof: {
         if (reader.streamUntilDelimiter(cmd_w, '\n', null)) {
@@ -115,8 +89,8 @@ fn readInput(self: @This(), gpa: Allocator) !Input {
 pub fn run(self: *@This(), gpa: Allocator) !void {
     loop: while (true) {
         // display command prompt, get input
-        try self.writeAll("+ ");
-        const user_input = try self.readInput(gpa);
+        try writeAll("+ ");
+        const user_input = try readInput(gpa);
         const cmd = user_input.text;
         defer gpa.free(cmd);
 
@@ -134,7 +108,7 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
                 'p' => try self.printCommand(range_str),
                 'w' => try self.writeCommand(range_str, &.{}),
                 '.' => try self.insertCommand(gpa, range_str, &.{}),
-                'd' => try self.deleteCommand(gpa, range_str),
+                'd' => try self.deleteCommand(range_str),
                 else => return error.Malformed,
             },
             else => switch (cmd_str[0]) {
@@ -173,8 +147,8 @@ fn printCommand(self: *@This(), range_str: []const u8) !void {
         // TODO: bounds checking
         if (self.buffer.get(idx)) |line| {
             try self.printLineNumber(idx);
-            try self.writeAll(line);
-            try self.writeAll("\n");
+            try writeAll(line);
+            try writeAll("\n");
         } else {
             break;
         }
@@ -199,15 +173,17 @@ fn writeCommand(
     });
 
     const file_name = switch (data_str.len) {
-        0 => self.file_out orelse return error.FileNameNotSet,
-        else => data_str,
+        0 => self.file orelse return error.FileNameNotSet,
+        else => blk: {
+            self.file = data_str;
+            break :blk data_str;
+        },
     };
+
     // TODO: create a separate file then atomic rename in place to
     // avoid situations where you save the file but it fails halfway through
     // losing all of your data - kinda like what vscode does
-    const file = try std.fs.cwd().createFile(file_name, .{});
-    defer file.close();
-    try self.buffer.save(file.writer(), range);
+    try self.buffer.save(file_name, range);
 }
 
 // Without command data, we are in a loop for inserting data.
@@ -238,7 +214,7 @@ fn insertCommand(
             }
             // get user input
             try self.printLineNumber(line);
-            const input = try self.readInput(gpa);
+            const input = try readInput(gpa);
             defer gpa.free(input.text);
             // Loop escaped by inputting a single period
             if (misc.eql(".", input.text)) break :insert;
@@ -259,7 +235,7 @@ fn insertCommand(
 
 // Deletes lines specified in the range.
 // Sets current line to first index deleted
-fn deleteCommand(self: *@This(), gpa: Allocator, range_str: []const u8) !void {
+fn deleteCommand(self: *@This(), range_str: []const u8) !void {
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
         .line = self.line,
@@ -268,7 +244,7 @@ fn deleteCommand(self: *@This(), gpa: Allocator, range_str: []const u8) !void {
     });
 
     self.line = range.start;
-    self.buffer.removeRange(gpa, range);
+    self.buffer.removeRange(range);
 }
 
 // TODO: testing

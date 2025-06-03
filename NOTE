@@ -1,0 +1,4 @@
+rewrite the stringpool to just store indexes into a map.
+the stringpool doesn't need to bother with reclaiming memory.
+the indexes will point to the start of the string.
+we can delimit these strings with newlines, because they are the literal only byte we can't have in a line.

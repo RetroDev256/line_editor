@@ -1,72 +1,52 @@
-//! Reference counted, owned, and interned strings
+//! Owned & interned strings
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-map: std.StringHashMapUnmanaged(usize),
+arena: std.heap.ArenaAllocator,
+map: std.StringHashMapUnmanaged(void),
 
 // Construct new empty string intern pool
-pub const empty: @This() = .{ .map = .empty };
+pub fn init(gpa: Allocator) @This() {
+    return .{ .arena = .init(gpa), .map = .empty };
+}
 
-// Free all memory allocated by the intern pool. Additionally, ensure
-// all memory allocated by the pool in it's lifetime is also freed.
-pub fn deinit(self: *@This(), gpa: Allocator) void {
-    var iter = self.map.keyIterator();
-    while (iter.next()) |entry| {
-        gpa.free(entry.*);
-    }
-
-    self.map.deinit(gpa);
-    self.* = undefined;
+// Free all memory allocated by the intern pool.
+pub fn deinit(self: *@This()) void {
+    defer self.* = undefined;
+    self.map.deinit(self.arena.child_allocator);
+    self.arena.deinit();
 }
 
 // Add a string to the intern pool, returning a stable pointer to the string.
 // The pointer will last as far as the string is not removed with `remove()`.
-pub fn add(self: *@This(), gpa: Allocator, str: []const u8) ![]const u8 {
-    if (self.map.getEntry(str)) |entry| {
-        // Update & return pre-existing
-        entry.value_ptr.* += 1;
-        return entry.key_ptr.*;
-    }
+pub fn add(self: *@This(), str: []const u8) ![]const u8 {
+    // Return pre-existing
+    if (self.map.getKey(str)) |entry| return entry;
 
-    // Allocate memory for the string
-    const entry_str = try gpa.dupe(u8, str);
-    errdefer gpa.free(entry_str);
+    // Allocate memory for our string
+    const arena = self.arena.allocator();
+    const entry = try arena.dupe(u8, str);
+    errdefer arena.free(entry);
 
     // Add the entry to our map, use the owned string
-    try self.map.putNoClobber(gpa, entry_str, 1);
+    try self.map.putNoClobber(self.arena.child_allocator, entry, void{});
 
     // Return the stable pointer
-    return entry_str;
-}
-
-// Reduces the reference count of a string in the intern pool, and
-// frees the string if it is unreferenced. Asserts that it exists.
-pub fn remove(self: *@This(), gpa: Allocator, str: []const u8) void {
-    const entry = self.map.getEntry(str) orelse unreachable;
-
-    // Update reference counter
-    entry.value_ptr.* -= 1;
-
-    // Remove unreferenced strings
-    if (entry.value_ptr.* == 0) {
-        gpa.free(entry.key_ptr.*);
-        self.map.removeByPtr(entry.key_ptr);
-    }
+    return entry;
 }
 
 test "Intern Pool" {
     const gpa = std.testing.allocator;
-
-    var intern_pool: @This() = .empty;
-    defer intern_pool.deinit(gpa);
+    var pool: @This() = .empty;
+    defer pool.deinit(gpa);
 
     // Inserting elements
-    const a = try intern_pool.add(gpa, "x");
-    const b = try intern_pool.add(gpa, "y");
-    const c = try intern_pool.add(gpa, "z");
-    const d = try intern_pool.add(gpa, "z");
-    const e = try intern_pool.add(gpa, "y");
+    const a = try pool.add(gpa, "x");
+    const b = try pool.add(gpa, "y");
+    const c = try pool.add(gpa, "z");
+    const d = try pool.add(gpa, "z");
+    const e = try pool.add(gpa, "y");
 
     try std.testing.expectEqualSlices(u8, "x", a);
     try std.testing.expectEqualSlices(u8, "y", b);
@@ -77,19 +57,6 @@ test "Intern Pool" {
     try std.testing.expectEqual(b.ptr, e.ptr);
     try std.testing.expectEqual(c.ptr, d.ptr);
 
-    try std.testing.expectEqual(intern_pool.map.size, 3);
-
-    // Removing elements
-    intern_pool.remove(gpa, "y");
-    intern_pool.remove(gpa, "z");
-    try std.testing.expectEqual(intern_pool.map.size, 3);
-
-    intern_pool.remove(gpa, "y");
-    try std.testing.expectEqual(intern_pool.map.size, 2);
-
-    intern_pool.remove(gpa, "z");
-    try std.testing.expectEqual(intern_pool.map.size, 1);
-
-    intern_pool.remove(gpa, "x");
-    try std.testing.expectEqual(intern_pool.map.size, 0);
+    try std.testing.expectEqual(pool.map.size, 3);
+    try std.testing.expectEqualSlices(u8, "xyz", pool.bytes.items);
 }

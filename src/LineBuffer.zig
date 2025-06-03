@@ -8,33 +8,39 @@ const InternPool = @import("InternPool.zig");
 lines: std.ArrayListUnmanaged([]const u8),
 pool: InternPool,
 
-pub const empty: @This() = .{
-    .lines = .empty,
-    .pool = .empty,
-};
-
-pub fn initReader(gpa: Allocator, reader: anytype) !@This() {
-    var self: @This() = .empty;
+pub fn init(gpa: Allocator, file_path: ?[]const u8) !@This() {
+    var self: @This() = .{ .lines = .empty, .pool = .init(gpa) };
     errdefer self.deinit(gpa);
 
-    var bytes: std.ArrayListUnmanaged(u8) = .empty;
-    defer bytes.deinit(gpa);
-
-    while (true) {
-        const hit_eof = while (true) {
-            var byte: [1]u8 = undefined;
-            const read = try reader.read(byte[0..]);
-            if (read == 0) break true;
-            if (byte[0] == '\n') break false;
-            try bytes.append(gpa, byte[0]);
+    if (file_path) |path| load_file: {
+        const file_open = std.fs.cwd().openFile(path, .{});
+        const file = file_open catch |err| switch (err) {
+            error.FileNotFound => break :load_file,
+            else => return err,
         };
+        defer file.close();
 
-        const line = try self.pool.add(gpa, bytes.items);
-        errdefer self.pool.remove(gpa, line);
-        bytes.clearRetainingCapacity();
-        try self.lines.append(gpa, line);
+        var br = std.io.bufferedReader(file.reader());
+        const reader = br.reader();
 
-        if (hit_eof) break;
+        var bytes: std.ArrayListUnmanaged(u8) = .empty;
+        defer bytes.deinit(gpa);
+
+        while (true) {
+            const hit_eof = while (true) {
+                var byte: u8 = undefined;
+                const read = try reader.read(@ptrCast(&byte));
+                if (read == 0) break true;
+                if (byte == '\n') break false;
+                try bytes.append(gpa, byte);
+            };
+
+            const line = try self.pool.add(bytes.items);
+            bytes.clearRetainingCapacity();
+            try self.lines.append(gpa, line);
+
+            if (hit_eof) break;
+        }
     }
 
     return self;
@@ -42,18 +48,26 @@ pub fn initReader(gpa: Allocator, reader: anytype) !@This() {
 
 pub fn deinit(self: *@This(), gpa: Allocator) void {
     self.lines.deinit(gpa);
-    self.pool.deinit(gpa);
+    self.pool.deinit();
     self.* = undefined;
 }
 
 // Save a range of lines to a file.
-pub fn save(self: *@This(), writer: anytype, range: Range) !void {
+pub fn save(self: *@This(), file_name: []const u8, range: Range) !void {
+    const file = try std.fs.cwd().createFile(file_name, .{});
+    defer file.close();
+
+    var bw = std.io.bufferedWriter(file.writer());
+    const writer = bw.writer();
+
     for (range.start..range.end) |line_no| {
         try writer.writeAll(self.lines.items[line_no]);
         if (line_no + 1 != range.end) {
             try writer.writeAll("\n");
         }
     }
+
+    try bw.flush();
 }
 
 // Retrieve a line by line number
@@ -64,22 +78,16 @@ pub fn get(self: @This(), index: usize) ?[]const u8 {
 
 // Insert some text at a certain line number.
 pub fn insert(self: *@This(), gpa: Allocator, index: usize, text: []const u8) !void {
-    const line = try self.pool.add(gpa, text);
-    errdefer self.pool.remove(gpa, text);
+    const line = try self.pool.add(text);
     try self.lines.insert(gpa, index, line);
 }
 
 // Remove a range of lines
-pub fn removeRange(self: *@This(), gpa: Allocator, range: Range) void {
-    for (range.start..range.end) |line_no| {
-        self.pool.remove(gpa, self.lines.items[line_no]);
-    }
-
+pub fn removeRange(self: *@This(), range: Range) void {
     const line_count = self.lines.items.len;
     for (range.end..line_count, range.start..) |src, dest| {
         self.lines.items[dest] = self.lines.items[src];
     }
-
     self.lines.items.len -= range.len();
 }
 
