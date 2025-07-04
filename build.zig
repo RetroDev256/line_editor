@@ -12,7 +12,7 @@ pub fn build(b: *std.Build) void {
     }
 }
 
-const target_strs = .{
+const target_strs: []const []const u8 = &.{
     "powerpc64le-linux", "aarch64-linux",   "aarch64-macos",   "mips-linux",
     "thumbeb-linux",     "powerpcle-linux", "aarch64-windows", "wasm32-wasi",
     "mips64-linux",      "wasm64-wasi",     "riscv32-linux",   "aarch64_be-linux",
@@ -25,7 +25,7 @@ const target_strs = .{
 
 fn buildAll(b: *std.Build, optimize: std.builtin.OptimizeMode, strip: ?bool) void {
     // build each target and install them
-    inline for (target_strs) |target_str| {
+    for (target_strs) |target_str| {
         const query = std.Build.parseTargetQuery(.{ .arch_os_abi = target_str });
         const target = b.resolveTargetQuery(query catch unreachable);
 

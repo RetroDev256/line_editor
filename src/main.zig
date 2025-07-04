@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const builtin = @import("builtin");
 const Runner = @import("Runner.zig");
 const misc = @import("misc.zig");
+const InternPool = @import("InternPool.zig");
 
 // GOAL:
 // make this a lightweight program to edit SINGLE files.
@@ -21,14 +22,42 @@ const misc = @import("misc.zig");
 // There is ONLY command mode.
 // Append/insert is done with `.[string][enter]` at all times
 
+// Change of plans 2.0:ko
+// p -> print lines
+// n -> number lines
+// a -> enter append mode
+// i -> enter insert mode
+// d -> delete line
+// c[string] -> change line to string
+// s/before/after/FLAGS -> replace before with after, according to POSIX
+// .[string] -> insert string before line
+// w[path] -> save lines to path
+// # -> comment
+// q -> exit
+
+// change of plans 3.0:
+// p -> print numbered lines
+// .[string] ->
+//     - enter EDIT mode if string == "", which is exited by '.'
+//     - this command APPENDS in both EDIT mode and COMMAND mode
+//     index 0 means to "place at start"
+// d -> delete line(s)
+// w[path] -> save lines to path
+// #[equation] -> solve math equation
+// s/before/after/FLAGS -> replace ALL before with after, according to POSIX
+// q -> exit
+// TODO: more according to ED
+
 pub fn main() !void {
-    const gpa = std.heap.smp_allocator;
+    const gpa = std.heap.page_allocator; //smp_allocator;
     const file = try parseArgs(gpa);
     defer if (file) |f| gpa.free(f);
+    var pool: InternPool = .empty;
+    defer pool.deinit(gpa);
 
-    var runner: Runner = try .init(gpa, file);
-    defer runner.deinit(gpa);
-    try runner.run(gpa);
+    var runner: Runner = try .init(gpa, &pool, file);
+    defer runner.deinit(gpa, &pool);
+    try runner.run(gpa, &pool);
 }
 
 fn parseArgs(gpa: Allocator) !?[]const u8 {

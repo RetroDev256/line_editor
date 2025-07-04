@@ -6,49 +6,41 @@ const InternPool = @import("InternPool.zig");
 
 // All of the lines are owned by the pool
 lines: std.ArrayListUnmanaged([]const u8),
-pool: InternPool,
 
-pub fn init(gpa: Allocator, file_path: ?[]const u8) !@This() {
-    var self: @This() = .{ .lines = .empty, .pool = .init(gpa) };
-    errdefer self.deinit(gpa);
+pub const empty: @This() = .{ .lines = .empty };
 
-    if (file_path) |path| load_file: {
-        const file_open = std.fs.cwd().openFile(path, .{});
-        const file = file_open catch |err| switch (err) {
-            error.FileNotFound => break :load_file,
-            else => return err,
+pub fn init(gpa: Allocator, pool: *InternPool, reader: anytype) !@This() {
+    var self: @This() = .empty;
+    errdefer self.deinit(gpa, pool);
+
+    var bytes: std.ArrayListUnmanaged(u8) = .empty;
+    defer bytes.deinit(gpa);
+
+    while (true) {
+        const hit_eof = while (true) {
+            var byte: u8 = undefined;
+            const read = try reader.read(@ptrCast(&byte));
+            if (read == 0) break true;
+            if (byte == '\n') break false;
+            try bytes.append(gpa, byte);
         };
-        defer file.close();
 
-        var br = std.io.bufferedReader(file.reader());
-        const reader = br.reader();
+        const line = try pool.add(gpa, bytes.items);
+        errdefer pool.remove(gpa, line);
+        bytes.clearRetainingCapacity();
+        try self.lines.append(gpa, line);
 
-        var bytes: std.ArrayListUnmanaged(u8) = .empty;
-        defer bytes.deinit(gpa);
-
-        while (true) {
-            const hit_eof = while (true) {
-                var byte: u8 = undefined;
-                const read = try reader.read(@ptrCast(&byte));
-                if (read == 0) break true;
-                if (byte == '\n') break false;
-                try bytes.append(gpa, byte);
-            };
-
-            const line = try self.pool.add(bytes.items);
-            bytes.clearRetainingCapacity();
-            try self.lines.append(gpa, line);
-
-            if (hit_eof) break;
-        }
+        if (hit_eof) break;
     }
 
     return self;
 }
 
-pub fn deinit(self: *@This(), gpa: Allocator) void {
+pub fn deinit(self: *@This(), gpa: Allocator, pool: *InternPool) void {
+    for (self.lines.items) |line| {
+        pool.remove(gpa, line);
+    }
     self.lines.deinit(gpa);
-    self.pool.deinit();
     self.* = undefined;
 }
 
@@ -77,15 +69,29 @@ pub fn get(self: @This(), index: usize) ?[]const u8 {
 }
 
 // Insert some text at a certain line number.
-pub fn insert(self: *@This(), gpa: Allocator, index: usize, text: []const u8) !void {
-    const line = try self.pool.add(text);
+pub fn insert(
+    self: *@This(),
+    gpa: Allocator,
+    pool: *InternPool,
+    index: usize,
+    text: []const u8,
+) !void {
+    const line = try pool.add(gpa, text);
+    errdefer pool.remove(gpa, line);
     try self.lines.insert(gpa, index, line);
 }
 
 // Remove a range of lines
-pub fn removeRange(self: *@This(), range: Range) void {
-    const line_count = self.lines.items.len;
-    for (range.end..line_count, range.start..) |src, dest| {
+pub fn removeRange(
+    self: *@This(),
+    gpa: Allocator,
+    pool: *InternPool,
+    range: Range,
+) void {
+    for (range.start..range.end) |overwritten| {
+        pool.remove(gpa, self.lines.items[overwritten]);
+    }
+    for (range.end..self.lines.items.len, range.start..) |src, dest| {
         self.lines.items[dest] = self.lines.items[src];
     }
     self.lines.items.len -= range.len();
@@ -95,14 +101,14 @@ const expectEqual = std.testing.expectEqual;
 const expectEqualSlices = std.testing.expectEqualSlices;
 
 test "memory management and stuff" {
-    try std.testing.checkAllAllocationFailures(
-        std.testing.allocator,
-        generalWorkload,
-        .{},
-    );
+    const gpa = std.testing.allocator;
+    try std.testing.checkAllAllocationFailures(gpa, generalWorkload, .{});
 }
 
 fn generalWorkload(gpa: Allocator) !void {
+    var pool: InternPool = .empty;
+    defer pool.deinit(gpa);
+
     var stream = std.io.fixedBufferStream(
         \\This is the original file content -
         \\testing allocation and stuff for the
@@ -110,8 +116,8 @@ fn generalWorkload(gpa: Allocator) !void {
         \\
     );
 
-    var self: @This() = try .initReader(gpa, stream.reader());
-    defer self.deinit(gpa);
+    var self: @This() = try .init(gpa, &pool, stream.reader());
+    defer self.deinit(gpa, &pool);
 
     const lines: []const []const u8 = &.{
         "this line is unique",
@@ -124,7 +130,7 @@ fn generalWorkload(gpa: Allocator) !void {
     };
 
     for (lines, 0..) |line, idx| {
-        try self.insert(gpa, idx, line);
+        try self.insert(gpa, &pool, idx, line);
     }
 
     for (0..lines.len) |index| {
@@ -135,7 +141,7 @@ fn generalWorkload(gpa: Allocator) !void {
     try expectEqual(lines.len + 4, self.lines.items.len);
 
     for (0..lines.len + 4) |_| {
-        self.removeRange(gpa, .init(0, 1));
+        self.removeRange(gpa, &pool, .init(0, 1));
     }
 
     try expectEqual(0, self.lines.items.len);

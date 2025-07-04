@@ -6,6 +6,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const File = std.fs.File;
+const InternPool = @import("InternPool.zig");
 const LineBuffer = @import("LineBuffer.zig");
 const Range = @import("Range.zig");
 const misc = @import("misc.zig");
@@ -16,16 +17,24 @@ file: ?[]const u8,
 line: usize,
 buffer: LineBuffer,
 
-pub fn init(gpa: Allocator, file_path: ?[]const u8) !@This() {
-    return .{
-        .file = file_path,
-        .line = 0,
-        .buffer = try .init(gpa, file_path),
-    };
+pub fn init(gpa: Allocator, pool: *InternPool, file_path: ?[]const u8) !@This() {
+    if (file_path) |path| load_file: {
+        const file_open = std.fs.cwd().openFile(path, .{});
+        const file = file_open catch |err| switch (err) {
+            error.FileNotFound => break :load_file,
+            else => return err,
+        };
+        defer file.close();
+
+        var br = std.io.bufferedReader(file.reader());
+        const reader = br.reader();
+        return .{ .file = path, .line = 0, .buffer = try .init(gpa, pool, reader) };
+    }
+    return .{ .file = null, .line = 0, .buffer = .empty };
 }
 
-pub fn deinit(self: *@This(), gpa: Allocator) void {
-    self.buffer.deinit(gpa);
+pub fn deinit(self: *@This(), gpa: Allocator, pool: *InternPool) void {
+    self.buffer.deinit(gpa, pool);
     self.* = undefined;
 }
 
@@ -60,38 +69,21 @@ fn printLineNumber(self: @This(), line: usize) !void {
     }
 }
 
-const Input = struct {
-    hit_eof: bool,
-    text: []const u8,
-};
-
-// helper function to get user input
-fn readInput(gpa: Allocator) !Input {
+fn readInput(gpa: Allocator) ![]const u8 {
     var cmd: ArrayListUnmanaged(u8) = .empty;
     defer cmd.deinit(gpa);
-    const cmd_w = cmd.writer(gpa);
     const reader = std.io.getStdIn().reader();
-    // Read one line into memory; Determine if we have hit EOF
-    const hit_eof = eof: {
-        if (reader.streamUntilDelimiter(cmd_w, '\n', null)) {
-            break :eof false;
-        } else |err| switch (err) {
-            error.EndOfStream => break :eof true,
-            // We have hit a different error, bubble it up
-            else => return err,
-        }
-    };
-    const text = try cmd.toOwnedSlice(gpa);
-    return .{ .hit_eof = hit_eof, .text = text };
+    try reader.streamUntilDelimiter(cmd.writer(gpa), '\n', null);
+    return try cmd.toOwnedSlice(gpa);
 }
 
 // command mode dispatch
-pub fn run(self: *@This(), gpa: Allocator) !void {
+pub fn run(self: *@This(), gpa: Allocator, pool: *InternPool) !void {
     loop: while (true) {
         // display command prompt, get input
         try writeAll("+ ");
-        const user_input = try readInput(gpa);
-        const cmd = user_input.text;
+
+        const cmd = try readInput(gpa);
         defer gpa.free(cmd);
 
         // split up the command string into parts
@@ -107,19 +99,16 @@ pub fn run(self: *@This(), gpa: Allocator) !void {
                 'q' => break :loop,
                 'p' => try self.printCommand(range_str),
                 'w' => try self.writeCommand(range_str, &.{}),
-                '.' => try self.insertCommand(gpa, range_str, &.{}),
-                'd' => try self.deleteCommand(range_str),
+                '.' => try self.insertCommand(gpa, pool, range_str, &.{}),
+                'd' => try self.deleteCommand(gpa, pool, range_str),
                 else => return error.Malformed,
             },
             else => switch (cmd_str[0]) {
                 'w' => try self.writeCommand(range_str, cmd_str[1..]),
-                '.' => try self.insertCommand(gpa, range_str, cmd_str[1..]),
+                '.' => try self.insertCommand(gpa, pool, range_str, cmd_str[1..]),
                 else => return error.Malformed,
             },
         }
-
-        // we have reached EOF of the command input, exit
-        if (user_input.hit_eof) break :loop;
     }
 }
 
@@ -193,6 +182,7 @@ fn writeCommand(
 fn insertCommand(
     self: *@This(),
     gpa: Allocator,
+    pool: *InternPool,
     range_str: []const u8,
     data_str: []const u8,
 ) !void {
@@ -215,27 +205,30 @@ fn insertCommand(
             // get user input
             try self.printLineNumber(line);
             const input = try readInput(gpa);
-            defer gpa.free(input.text);
+            defer gpa.free(input);
             // Loop escaped by inputting a single period
-            if (misc.eql(".", input.text)) break :insert;
+            if (misc.eql(".", input)) break :insert;
             // insert the line
-            try self.buffer.insert(gpa, line, input.text);
-            // Loop escaped if EOF is reached
-            if (input.hit_eof) break :insert;
+            try self.buffer.insert(gpa, pool, line, input);
         }
         self.line = line;
     } else {
         // one-shot mode duplicates the string line over the entire range
         self.line = range.end;
         for (range.start..range.end) |_| {
-            try self.buffer.insert(gpa, range.start, data_str);
+            try self.buffer.insert(gpa, pool, range.start, data_str);
         }
     }
 }
 
 // Deletes lines specified in the range.
 // Sets current line to first index deleted
-fn deleteCommand(self: *@This(), range_str: []const u8) !void {
+fn deleteCommand(
+    self: *@This(),
+    gpa: Allocator,
+    pool: *InternPool,
+    range_str: []const u8,
+) !void {
     // Parse the range
     const range, _ = try Range.parse(range_str, .{
         .line = self.line,
@@ -244,7 +237,7 @@ fn deleteCommand(self: *@This(), range_str: []const u8) !void {
     });
 
     self.line = range.start;
-    self.buffer.removeRange(range);
+    self.buffer.removeRange(gpa, pool, range);
 }
 
 // TODO: testing
